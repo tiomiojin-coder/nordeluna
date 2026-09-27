@@ -1,14 +1,23 @@
 import SwiftUI
 
 private struct TouchKeyButton: View {
-    let title: String
-    let scancode: Int32
+    let slot: TouchControlSlot
     var size: CGFloat = 64
+    @ObservedObject private var engine = NordelunaEngine.shared
     @State private var pressed = false
+    @State private var pressedScancode: Int32?
 
     var body: some View {
-        Text(title)
-            .font(.system(size: size * 0.32, weight: .bold, design: .rounded))
+        VStack(spacing: 0) {
+            Text(slot.face)
+                .font(.system(size: size * 0.29, weight: .bold, design: .rounded))
+            Text(keyboardKeyName(for: engine.scancode(for: slot)))
+                .font(.system(size: max(8, size * 0.12), weight: .semibold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+                .opacity(0.72)
+                .padding(.horizontal, 5)
+        }
             .foregroundStyle(.white)
             .frame(width: size, height: size)
             .background(.ultraThinMaterial, in: Circle())
@@ -20,7 +29,9 @@ private struct TouchKeyButton: View {
                     .onChanged { _ in
                         guard !pressed else { return }
                         pressed = true
-                        NordelunaEngine.shared.setKey(scancode, pressed: true)
+                        let scancode = engine.scancode(for: slot)
+                        pressedScancode = scancode
+                        engine.setKey(scancode, pressed: true)
                     }
                     .onEnded { _ in release() }
             )
@@ -30,7 +41,10 @@ private struct TouchKeyButton: View {
     private func release() {
         guard pressed else { return }
         pressed = false
-        NordelunaEngine.shared.setKey(scancode, pressed: false)
+        if let pressedScancode {
+            engine.setKey(pressedScancode, pressed: false)
+        }
+        pressedScancode = nil
     }
 }
 
@@ -114,13 +128,13 @@ struct TouchControlsView: View {
                 DirectionPad()
                 Spacer(minLength: 24)
                 ZStack {
-                    TouchKeyButton(title: "A", scancode: Int32(GAMECORE_SCANCODE_Z), size: 72)
+                    TouchKeyButton(slot: .a, size: 72)
                         .offset(x: 42, y: -18)
-                    TouchKeyButton(title: "B", scancode: Int32(GAMECORE_SCANCODE_X), size: 66)
+                    TouchKeyButton(slot: .b, size: 66)
                         .offset(x: -28, y: 24)
-                    TouchKeyButton(title: "X", scancode: Int32(GAMECORE_SCANCODE_A), size: 48)
+                    TouchKeyButton(slot: .x, size: 48)
                         .offset(x: -32, y: -52)
-                    TouchKeyButton(title: "Y", scancode: Int32(GAMECORE_SCANCODE_S), size: 48)
+                    TouchKeyButton(slot: .y, size: 48)
                         .offset(x: 30, y: 54)
                 }
                 .frame(width: 160, height: 154)

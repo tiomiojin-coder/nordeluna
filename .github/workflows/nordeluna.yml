@@ -2,6 +2,14 @@ name: Build Nordeluna IPA
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/nordeluna.yml
+      - ios/Nordeluna/**
+      - ios/Empo/src/App/**
+      - scripts/**
 
 permissions:
   contents: read

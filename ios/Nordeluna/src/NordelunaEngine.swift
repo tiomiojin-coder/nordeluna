@@ -18,6 +18,7 @@ final class NordelunaEngine: ObservableObject {
     @Published private(set) var statusText = "Preparando o Nordeluna…"
     @Published var alertMessage: String?
     @Published var controlsVisible = true
+    @Published private(set) var controlMappings: [TouchControlSlot: Int32]
 
     private var started = false
     private var pausedByBackground = false
@@ -25,7 +26,36 @@ final class NordelunaEngine: ObservableObject {
     private var pendingKeyReleases: [Int32: Task<Void, Never>] = [:]
     private static let minimumKeyHold: Duration = .milliseconds(50)
 
-    private init() {}
+    private init() {
+        var mappings: [TouchControlSlot: Int32] = [:]
+        for slot in TouchControlSlot.allCases {
+            if let stored = UserDefaults.standard.object(forKey: slot.storageKey) as? NSNumber {
+                mappings[slot] = stored.int32Value
+            } else {
+                mappings[slot] = slot.defaultScancode
+            }
+        }
+        controlMappings = mappings
+    }
+
+    func scancode(for slot: TouchControlSlot) -> Int32 {
+        controlMappings[slot] ?? slot.defaultScancode
+    }
+
+    func setScancode(_ scancode: Int32, for slot: TouchControlSlot) {
+        guard nordelunaKeyboardKeys.contains(where: { $0.scancode == scancode }) else { return }
+        controlMappings[slot] = scancode
+        UserDefaults.standard.set(Int(scancode), forKey: slot.storageKey)
+    }
+
+    func resetControlMappings() {
+        var defaults: [TouchControlSlot: Int32] = [:]
+        for slot in TouchControlSlot.allCases {
+            defaults[slot] = slot.defaultScancode
+            UserDefaults.standard.removeObject(forKey: slot.storageKey)
+        }
+        controlMappings = defaults
+    }
 
     func start() {
         guard !started else { return }
