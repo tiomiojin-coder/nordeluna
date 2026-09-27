@@ -1,0 +1,58 @@
+import SwiftUI
+
+struct SettingsToggle: View {
+    let title: String
+    @Binding var isOn: Bool
+    let description: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Toggle(title, isOn: $isOn)
+            Text(description)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, Spacing.xxs)
+    }
+}
+
+struct SettingsNavigationRow<Destination: View>: View {
+    let title: String
+    let description: String
+    @ViewBuilder let destination: () -> Destination
+
+    var body: some View {
+        NavigationLink {
+            destination()
+        } label: {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text(title)
+                Text(description)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, Spacing.xxs)
+        }
+    }
+}
+
+struct SettingsPicker<SelectionValue: Hashable, Content: View>: View {
+    let title: String
+    @Binding var selection: SelectionValue
+    let description: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Picker(selection: $selection) {
+                content()
+            } label: {
+                Text(title)
+            }
+            Text(description)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, Spacing.xxs)
+    }
+}

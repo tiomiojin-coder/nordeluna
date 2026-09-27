@@ -1,0 +1,89 @@
+---
+title: How it works
+description: The parts of Empo, how the SwiftUI app and the C++ engine share a process, and where to read more about each piece.
+sidebar:
+  icon: layers
+---
+
+Empo is an app and a game engine in one process. The app is SwiftUI and UIKit. The app owns
+the window and the user interface. The engine owns the game.
+
+Empo has two engines, and each one is a game core. `MkxpCore` is a C++ fork of mkxp-z that runs
+RPG Maker games in Ruby 1.8, 1.9, or 3.1. `PsdkCore` is LiteRGSS2 and LiteCGSS, and it runs
+PSDK games in Ruby 3.0. Read
+[`cores.md`](https://github.com/mateo-m/empo-app/blob/main/ios/Empo/docs/cores.md) for the rules
+that keep the two cores apart.
+
+## The repository
+
+<FileTree>
+
+- mkxp-z-apple-mobile/ The engine fork. A git submodule, pure C++.
+- ios/
+  - Empo/ The app. SwiftUI, with UIKit for the touch controls.
+  - Dependencies/ Cross-compiled static libraries: SDL, SFML, four Ruby versions, OpenAL, and the LiteRGSS2 fork.
+  - GameProbe/ A Swift package that reads game metadata. It builds on Linux, so CI can test it.
+- docs/ This documentation.
+
+</FileTree>
+
+## Three Ruby interpreters in the RPG Maker core
+
+Ruby 1.8, 1.9, and 3.1 compile separately. Each version merges with its binding code into one
+relocatable object file, and each object exports exactly one symbol. At import, Empo reads the
+scripts of the game and decides which interpreter it needs. At launch, the app sends a session
+config, and the engine dispatches to the correct one.
+
+Ruby 3.1 also carries syntax-transform patches, so Pokemon Essentials forks that mix old grammar
+with a modern runtime still parse. The app turns the mode on for each game that needs it.
+
+Read [`multi-ruby.md`](https://github.com/mateo-m/empo-app/blob/main/ios/Empo/docs/multi-ruby.md) for the detection rules and the dispatch mechanism.
+
+## One session for each process
+
+The app creates SDL, the GL context, OpenAL, and the Ruby interpreter one time, and it keeps
+them for the lifetime of the process. iOS does not let an app relaunch itself between games, and
+`ruby_init()` runs one time for each process.
+
+This is why Empo plays one game for each session. Read [`multi-session.md`](https://github.com/mateo-m/empo-app/blob/main/ios/Empo/docs/multi-session.md) for the
+quit paths and the state that stays behind.
+
+## Touch controls are keyboard events
+
+The overlay does not talk to the engine through a control API. It calls `SDL_PushEvent` with
+synthetic key events, so the engine reads them as it reads a hardware keyboard. A new button or
+a new layout needs no change in the engine.
+
+Games can ship their own layout. Read [Ship custom controls](/controls-format).
+
+## Windows APIs in Ruby
+
+RPG Maker games call Win32 functions through `Win32API`. Two preload scripts,
+`win32_wrap.rb` and `platform_compat.rb`, stub out the calls that games expect. They also
+neutralize `system`, `fork`, and `spawn`, so a game cannot start a process.
+
+## Import writes containers, not database rows
+
+Each game is a folder under `Documents/Games/<title>/`. There is no database. The import
+pipeline extracts the source one time, validates each game root that it finds, and commits one
+container for each game that you select.
+
+Read [`import-pipeline.md`](https://github.com/mateo-m/empo-app/blob/main/ios/Empo/docs/import-pipeline.md) for the stages and the invariants.
+
+## Pause is a frozen frame
+
+The SDL window and the SwiftUI view hierarchy cannot animate together. Empo takes a snapshot of
+the last frame, shows the snapshot, and animates that instead.
+
+Read [`pause-resume.md`](https://github.com/mateo-m/empo-app/blob/main/ios/Empo/docs/pause-resume.md) for the two pause modes.
+
+## Read next
+
+- [`design-system.md`](https://github.com/mateo-m/empo-app/blob/main/ios/Empo/docs/design-system.md) in
+  the repository: the visual rules the app follows, sheets included.
+- [`sdl-ruby-workarounds.md`](https://github.com/mateo-m/mkxp-z-apple-mobile/blob/main/docs/sdl-ruby-workarounds.md)
+  in the engine repository: why SDL, the GL context, OpenAL, and the Ruby VM are persistent.
+- [`patches-format.md`](https://github.com/mateo-m/mkxp-z-apple-mobile/blob/main/docs/patches-format.md)
+  in the engine repository: the `patches.json` script-patching system.
+- [CONTRIBUTING.md](https://github.com/mateo-m/empo-app/blob/main/CONTRIBUTING.md): the build
+  requirements and the steps to build the app.

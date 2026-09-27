@@ -1,0 +1,583 @@
+---
+# The release pipeline, end to end. Two ways in, same result:
+#
+#   * From a computer: scripts/release.sh <bump> cuts the release
+#     locally (bump + changelog + signed commit + tags) and pushes.
+#     The v*.*.* tag push lands here and CI does the rest.
+#   * From anywhere (e.g. a phone): workflow_dispatch with mode=cut
+#     runs the same cut in the `cut` job via API commits, which
+#     creates the same tags and flows into the same tag-push run.
+#
+# Either way the tag-push run builds, audits, ad-hoc signs, and
+# publishes the unsigned .ipa, then the post-release job syncs the
+# AltStore manifest + engine pin STRAIGHT TO MAIN (no PR): commits
+# created with EMPO_RELEASE_TOKEN are GitHub-signed and authored by
+# the token's owner, whose repo-admin role bypasses the ruleset.
+# Finally the notify job posts the release to Discord (chained as a
+# job because GITHUB_TOKEN-created releases never emit workflow
+# events, so an `on: release` workflow would never fire).
+#
+# workflow_dispatch with mode=dry-run builds + audits any ref and
+# uploads the .ipa as a workflow artifact without publishing anything.
+#
+# Secrets:
+#   EMPO_DEPS_READ_TOKEN         read empo-deps (dep tarballs)
+#   EMPO_RELEASE_TOKEN           fine-grained PAT, Contents: RW on
+#                                THIS repo + mkxp-z-apple-mobile +
+#                                litergss2-apple-mobile.
+#                                Powers the cut and sync commits
+#   DISCORD_RELEASE_WEBHOOK_URL  release announcements
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "cut = bump + tag + full release; dry-run = build + audit only; announce = re-post an existing release to Discord"
+        type: choice
+        options: [cut, dry-run, announce]
+        default: cut
+      bump:
+        description: "cut only: major | minor | patch, or an explicit semver"
+        required: false
+        default: "patch"
+      version:
+        description: "announce only: released version to post (e.g. 0.4.0)"
+        required: false
+        default: ""
+      ref:
+        description: "dry-run only: ref to build (tag, branch, or sha)"
+        required: false
+        default: "main"
+      runner:
+        description: "dry-run only: where to build (self = your registered Mac; hosted = GitHub runners). Tag releases always build hosted."
+        type: choice
+        options: [hosted, self]
+        default: hosted
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: release
+
+jobs:
+  # ── Decision half (phone path) ────────────────────────────────────
+  # Mirrors scripts/release.sh: resolve the version, bump project.yml,
+  # regenerate the changelog, commit to main, tag v<version> here and
+  # empo-v<version> on each core's engine repo. The commit + tags are created
+  # via the API with EMPO_RELEASE_TOKEN, so the commit is
+  # GitHub-signed and the tag push triggers the build below.
+  cut:
+    name: Cut release
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'cut'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require EMPO_RELEASE_TOKEN
+        env:
+          GH_TOKEN: ${{ secrets.EMPO_RELEASE_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::EMPO_RELEASE_TOKEN is not set. Create a fine-grained PAT (Contents: Read+Write on this repo, mkxp-z-apple-mobile and litergss2-apple-mobile) and add it as a repo secret."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          submodules: false
+
+      - name: Verify empo-deps pins
+        env:
+          GH_TOKEN: ${{ secrets.EMPO_DEPS_READ_TOKEN }}
+          REQUIRE_PUBLISHED: "1"
+        run: scripts/verify-empo-deps-pins.sh
+
+      - name: Install git-cliff
+        run: |
+          set -e
+          curl -fsSL -o /tmp/git-cliff.tar.gz \
+            https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-unknown-linux-gnu.tar.gz
+          tar -xzf /tmp/git-cliff.tar.gz -C /tmp
+          BIN="$(find /tmp -type f -name git-cliff -perm -u+x | head -n 1)"
+          sudo mv "$BIN" /usr/local/bin/git-cliff
+          git-cliff --version
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -e
+          BUMP="${{ inputs.bump }}"
+          case "$BUMP" in
+            major | minor | patch)
+              LATEST_TAG=$(git tag --list "v*.*.*" --sort=-v:refname | head -n 1)
+              if [ -z "$LATEST_TAG" ]; then
+                VERSION="0.1.0"
+              else
+                CURRENT="${LATEST_TAG#v}"
+                MAJOR="${CURRENT%%.*}"
+                REST="${CURRENT#*.}"
+                MINOR="${REST%%.*}"
+                PATCH="${REST#*.}"
+                case "$BUMP" in
+                  major) VERSION="$((MAJOR + 1)).0.0" ;;
+                  minor) VERSION="${MAJOR}.$((MINOR + 1)).0" ;;
+                  patch) VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+                esac
+              fi
+              ;;
+            *)
+              if ! printf '%s' "$BUMP" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+                echo "::error::bump must be major|minor|patch or a semver, got: $BUMP"
+                exit 1
+              fi
+              VERSION="$BUMP"
+              ;;
+          esac
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::tag v$VERSION already exists"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Cutting v$VERSION"
+
+      - name: Guard engine tags + submodule pointers
+        env:
+          GH_TOKEN: ${{ secrets.EMPO_RELEASE_TOKEN }}
+        run: |
+          set -e
+          VERSION="${{ steps.version.outputs.version }}"
+          # One entry per core: the submodule path here, the fork that
+          # holds that engine source, and the name this job stores the
+          # gitlink under for the tag step below.
+          for ENTRY in \
+            "mkxp-z-apple-mobile:mateo-m/mkxp-z-apple-mobile:mkxp_gitlink" \
+            "ios/Dependencies/sources/litergss2:mateo-m/litergss2-apple-mobile:litergss2_gitlink"; do
+            SUBMODULE="${ENTRY%%:*}"
+            REST="${ENTRY#*:}"
+            FORK="${REST%%:*}"
+            VAR="${REST##*:}"
+            BRANCH=$(git config -f .gitmodules --get "submodule.$SUBMODULE.branch" || echo dev)
+            GITLINK=$(git ls-tree HEAD "$SUBMODULE" | awk '{print $3}')
+            if [ -z "$GITLINK" ]; then
+              echo "::error::no submodule commit for $SUBMODULE"
+              exit 1
+            fi
+            # A cut that failed after it tagged one fork leaves that tag
+            # behind. The same tag on the same commit is that cut again,
+            # so go on. Another commit is two releases under one version.
+            # On a 404, gh api exits 1 but still prints the error body to
+            # stdout, so only the exit code says whether the tag exists.
+            if TAGGED=$(gh api "repos/$FORK/git/ref/tags/empo-v$VERSION" --jq .object.sha 2>/dev/null) \
+              && [ "$TAGGED" != "$GITLINK" ]; then
+              echo "::error::$FORK carries empo-v$VERSION on commit $TAGGED, not $GITLINK"
+              exit 1
+            fi
+            STATUS=$(gh api "repos/$FORK/compare/$BRANCH...$GITLINK" --jq .status)
+            case "$STATUS" in
+              identical | behind) ;;
+              *)
+                echo "::error::pinned commit $GITLINK is not on $FORK $BRANCH (compare status: $STATUS)"
+                exit 1
+                ;;
+            esac
+            echo "$VAR=$GITLINK" >> "$GITHUB_ENV"
+          done
+
+      - name: Bump version + changelog
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          VERSION="${{ steps.version.outputs.version }}"
+          BUILD=$(git rev-list --count HEAD)
+          sed -i "s/MARKETING_VERSION: .*/MARKETING_VERSION: $VERSION/" ios/Empo/project.yml
+          sed -i "s/CURRENT_PROJECT_VERSION: .*/CURRENT_PROJECT_VERSION: $BUILD/" ios/Empo/project.yml
+          git-cliff --config cliff.toml --unreleased --tag "v$VERSION" --prepend CHANGELOG.md
+          perl -0pi -e 's/\n{3,}/\n\n/g' CHANGELOG.md
+          echo "version: $VERSION, build: $BUILD"
+
+      - name: Commit to main + create tags
+        env:
+          GH_TOKEN: ${{ secrets.EMPO_RELEASE_TOKEN }}
+        run: |
+          set -e
+          VERSION="${{ steps.version.outputs.version }}"
+          BUILD=$(sed -n 's/.*CURRENT_PROJECT_VERSION: //p' ios/Empo/project.yml | head -n 1)
+          HEAD="$(git rev-parse HEAD)"
+          base64 < ios/Empo/project.yml | tr -d '\n' > /tmp/project.b64
+          base64 < CHANGELOG.md | tr -d '\n' > /tmp/changelog.b64
+          OID=$(gh api graphql \
+            -F repo="$GITHUB_REPOSITORY" -F head="$HEAD" \
+            -F message="chore: bump version to $VERSION (build $BUILD)" \
+            -F path1="ios/Empo/project.yml" -F contents1=@/tmp/project.b64 \
+            -F path2="CHANGELOG.md" -F contents2=@/tmp/changelog.b64 \
+            -f query='mutation($repo: String!, $head: GitObjectID!, $message: String!, $path1: String!, $contents1: Base64String!, $path2: String!, $contents2: Base64String!) {
+              createCommitOnBranch(input: {
+                branch: {repositoryNameWithOwner: $repo, branchName: "main"},
+                expectedHeadOid: $head,
+                message: {headline: $message},
+                fileChanges: {additions: [{path: $path1, contents: $contents1}, {path: $path2, contents: $contents2}]}
+              }) { commit { oid } }
+            }' --jq '.data.createCommitOnBranch.commit.oid')
+          echo "bump commit: $OID"
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/v$VERSION" -f sha="$OID"
+          # Each core's engine source gets the same tag, so a shipped
+          # binary names one commit in each fork. The mkxp-z tag push
+          # also runs that repo's artifact build.
+          gh api "repos/mateo-m/mkxp-z-apple-mobile/git/refs" \
+            -f ref="refs/tags/empo-v$VERSION" -f sha="$mkxp_gitlink" ||
+            gh api "repos/mateo-m/mkxp-z-apple-mobile/git/ref/tags/empo-v$VERSION" >/dev/null
+          gh api "repos/mateo-m/litergss2-apple-mobile/git/refs" \
+            -f ref="refs/tags/empo-v$VERSION" -f sha="$litergss2_gitlink" ||
+            gh api "repos/mateo-m/litergss2-apple-mobile/git/ref/tags/empo-v$VERSION" >/dev/null
+          echo "tagged v$VERSION (app) + empo-v$VERSION (mkxp-z and litergss2); the tag push runs the build"
+
+  # ── Mechanical half: build, audit, publish ───────────────────────
+  build:
+    name: Build + audit .ipa
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run')
+    # Tag releases always build on hosted runners (laptop-independent
+    # releases are the point). Dry runs may opt into the self-hosted
+    # Mac for speed.
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.runner == 'self') && fromJSON('["self-hosted", "macOS"]') || 'macos-latest' }}
+    timeout-minutes: 90
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      build: ${{ steps.meta.outputs.build }}
+      ipa_name: ${{ steps.package.outputs.ipa_name }}
+      ipa_size: ${{ steps.package.outputs.ipa_size }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+          fetch-depth: 0
+          submodules: false
+
+      - name: Checkout engine submodule
+        run: |
+          # -c (not --global) so nothing persists on self-hosted runners.
+          git -c url."https://github.com/".insteadOf="git@github.com:" \
+              submodule update --init --recursive mkxp-z-apple-mobile
+
+      - name: Verify empo-deps pins
+        # Tag releases must build from published pins (this replaces
+        # the old deps-pins tag trigger).
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.EMPO_DEPS_READ_TOKEN }}
+          REQUIRE_PUBLISHED: "1"
+        run: scripts/verify-empo-deps-pins.sh
+
+      - name: Resolve version + build number
+        id: meta
+        run: |
+          set -e
+          VERSION="$(sed -n 's/.*MARKETING_VERSION: //p' ios/Empo/project.yml | head -n 1 | tr -d '\"')"
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+            if [ "$VERSION" != "$TAG_VERSION" ]; then
+              echo "error: tag $GITHUB_REF_NAME does not match project.yml MARKETING_VERSION $VERSION" >&2
+              exit 1
+            fi
+          fi
+          # The number baked into the binary is project.yml's
+          # CURRENT_PROJECT_VERSION (set at cut time), NOT the commit
+          # count at the tag. The tag sits one commit later.
+          BUILD="$(sed -n 's/.*CURRENT_PROJECT_VERSION: //p' ios/Empo/project.yml | head -n 1)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$VERSION (build $BUILD)"
+
+      - name: Select newest Xcode
+        # DEVELOPER_DIR instead of xcode-select: no sudo, so the same
+        # step works on hosted runners and a self-hosted Mac.
+        run: |
+          XCODE="$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)"
+          echo "Using $XCODE"
+          echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
+          DEVELOPER_DIR="$XCODE/Contents/Developer" xcodebuild -version
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Cache dependency trees
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/Dependencies/build-iphoneos-arm64
+            ios/Dependencies/build-iphonesimulator-arm64
+            ios/Dependencies/ANGLE/iphoneos
+            ios/Dependencies/ANGLE/iphonesimulator
+            ios/Dependencies/ANGLE/.fetched-version
+            ios/Dependencies/native/.fetched-version
+            ios/Dependencies/engine/.fetched-version
+          key: deps-${{ runner.os }}-${{ hashFiles('ios/Dependencies/native/.version', 'ios/Dependencies/ANGLE/.version', 'ios/Dependencies/engine/.version') }}
+
+      - name: Hydrate prebuilt dependencies
+        env:
+          GH_TOKEN: ${{ secrets.EMPO_DEPS_READ_TOKEN }}
+        run: |
+          set -e
+          tools/fetch-angle.sh
+          tools/fetch-native-deps.sh
+          tools/fetch-engine-prebuilt.sh
+          PLATFORM_NAME=iphoneos scripts/verify-native-deps.sh
+
+      - name: Create empty signing overrides
+        # Signing.xcconfig is a gitignored per-machine file (see
+        # Signing.xcconfig.example). CI builds unsigned, so empty works.
+        run: touch ios/Empo/Signing.xcconfig
+
+      - name: Generate Xcode project
+        working-directory: ios/Empo
+        run: xcodegen generate --spec project.yml --project . --quiet
+
+      - name: Build Release (iphoneos)
+        # Build the SCHEME, not the target. A -target build resolves
+        # SwiftPM packages through the legacy build system, which
+        # cannot find the generated module map for a C-family package
+        # target (json5cpp): "module map file ...
+        # GeneratedModuleMaps-iphoneos/json5cpp.modulemap not found",
+        # reported on hosted runners as unresolvable _DarwinFoundation
+        # module dependencies.
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ios/Empo/Empo.xcodeproj \
+            -scheme Empo \
+            -destination 'generic/platform=iOS' \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO \
+            PRODUCT_BUNDLE_IDENTIFIER=sh.mateo.empo \
+            CONFIGURATION_BUILD_DIR="$PWD/build/Release-iphoneos" \
+            build 2>&1 | tail -n 40
+          test -d build/Release-iphoneos/Empo.app
+
+      # Ad-hoc signature with our entitlements blob embedded. The
+      # template sideloaders (AltStore/Sideloadly/ESign) re-sign over.
+      # See the detailed rationale in scripts/release.sh.
+      - name: Sign + package .ipa
+        id: package
+        run: |
+          set -e
+          # Inside out. A nested framework carries its own signature,
+          # and signing the app root does not reach inside it. The
+          # build ran with CODE_SIGNING_ALLOWED=NO, so every core
+          # framework arrives unsigned. Sign what the bundle has:
+          # EMPO_CORES in ios/Empo/project.yml decides whether this
+          # build ships one core or both.
+          for FRAMEWORK in build/Release-iphoneos/Empo.app/Frameworks/*.framework; do
+            codesign --force --sign - --timestamp=none "$FRAMEWORK"
+          done
+          codesign --force --sign - \
+            --generate-entitlement-der \
+            --entitlements ios/Empo/Empo.entitlements \
+            build/Release-iphoneos/Empo.app
+          scripts/audit-ipa.sh --version "${{ steps.meta.outputs.version }}" build/Release-iphoneos/Empo.app
+          mkdir -p build/ipa/Payload
+          cp -R build/Release-iphoneos/Empo.app build/ipa/Payload/Empo.app
+          IPA_NAME="Empo-${{ steps.meta.outputs.version }}-unsigned.ipa"
+          (cd build/ipa && zip -qr "$IPA_NAME" Payload)
+          IPA_SIZE="$(stat -f%z "build/ipa/$IPA_NAME")"
+          echo "ipa_name=$IPA_NAME" >> "$GITHUB_OUTPUT"
+          echo "ipa_size=$IPA_SIZE" >> "$GITHUB_OUTPUT"
+          echo "Packaged $IPA_NAME ($IPA_SIZE bytes)"
+
+      - name: Upload .ipa artifact (dry run)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.ipa_name }}
+          path: build/ipa/${{ steps.package.outputs.ipa_name }}
+
+      - name: Create GitHub release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          VERSION="${{ steps.meta.outputs.version }}"
+          scripts/extract-changelog.sh "$VERSION" > changelog-section.md
+          {
+            echo "## What's changed"
+            echo ""
+            cat changelog-section.md
+            echo ""
+            echo "---"
+            echo "> Unsigned build - sign the app with [SideStore](https://sidestore.io), [AltStore (Classic)](https://altstore.io), or [Sideloadly](https://sideloadly.io) before installing."
+          } > release-notes.md
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --notes-file release-notes.md \
+            "build/ipa/${{ steps.package.outputs.ipa_name }}"
+
+  # ── Finish: sync AltStore manifest + engine pin to main ──────────
+  post-release:
+    name: Sync AltStore manifest + engine pin
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          submodules: false
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Wait for engine artifact + re-pin
+        # The empo-v tag (created by the cut) triggers the engine
+        # repo's engine-artifacts workflow. Wait for its release, then
+        # re-pin the engine prebuilt so the pin always names the
+        # artifact built from this release's exact source.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          VERSION="${{ needs.build.outputs.version }}"
+          ENGINE_TAG="empo-v$VERSION"
+          REPO=mateo-m/mkxp-z-apple-mobile
+          for i in $(seq 1 60); do
+            STATUS="$(gh run list --repo "$REPO" --branch "$ENGINE_TAG" \
+              --workflow engine-artifacts --limit 1 \
+              --json status,conclusion \
+              --jq '.[0] | .status + ":" + (.conclusion // "")')"
+            echo "engine-artifacts [$i/60]: ${STATUS:-not started}"
+            case "$STATUS" in
+              completed:success) break ;;
+              completed:*) echo "engine artifact build failed" >&2; exit 1 ;;
+            esac
+            if [ "$i" = "60" ]; then
+              echo "timed out waiting for engine artifact" >&2
+              exit 1
+            fi
+            sleep 30
+          done
+          curl -fL --retry 3 -o engine.tar.gz \
+            "https://github.com/$REPO/releases/download/$ENGINE_TAG/engine-ios-prebuilt.tar.gz"
+          SHA256="$(sha256sum engine.tar.gz | awk '{print $1}')"
+          PIN=ios/Dependencies/engine/.version
+          sed -i "s/^ENGINE_VERSION=.*/ENGINE_VERSION=$ENGINE_TAG/" "$PIN"
+          sed -i "s/^ENGINE_SHA256=.*/ENGINE_SHA256=$SHA256/" "$PIN"
+
+      - name: Update AltStore source
+        run: |
+          set -e
+          VERSION="${{ needs.build.outputs.version }}"
+          bun install --frozen-lockfile
+          scripts/extract-changelog.sh "$VERSION" > changelog-section.md
+          bun scripts/update-altstore-source.ts \
+            --version "$VERSION" \
+            --build "${{ needs.build.outputs.build }}" \
+            --size "${{ needs.build.outputs.ipa_size }}" \
+            --date "$(date -u +%Y-%m-%d)" \
+            --download-url "https://github.com/${{ github.repository }}/releases/download/v$VERSION/${{ needs.build.outputs.ipa_name }}" \
+            --description "$(cat changelog-section.md)"
+          # The Format gate (oxfmt) checks this file on main. Keep the
+          # generated manifest formatted so the gate stays green.
+          bunx oxfmt altstore-source.json
+
+      - name: Push sync commit to main
+        # No PR: commits created with EMPO_RELEASE_TOKEN are
+        # GitHub-signed and authored by the token's owner, whose
+        # repo-admin role bypasses the ruleset. The expected head is
+        # re-read live so a concurrent push fails loudly instead of
+        # being clobbered.
+        env:
+          GH_TOKEN: ${{ secrets.EMPO_RELEASE_TOKEN }}
+        run: |
+          set -e
+          VERSION="${{ needs.build.outputs.version }}"
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::EMPO_RELEASE_TOKEN is not set; finish manually with: scripts/release.sh --sync-only $VERSION"
+            exit 1
+          fi
+          HEAD="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          base64 < altstore-source.json | tr -d '\n' > /tmp/altstore.b64
+          base64 < ios/Dependencies/engine/.version | tr -d '\n' > /tmp/pin.b64
+          gh api graphql \
+            -F repo="$GITHUB_REPOSITORY" -F head="$HEAD" \
+            -F message="chore(release): sync AltStore source and engine pin for v$VERSION" \
+            -F path1="altstore-source.json" -F contents1=@/tmp/altstore.b64 \
+            -F path2="ios/Dependencies/engine/.version" -F contents2=@/tmp/pin.b64 \
+            -f query='mutation($repo: String!, $head: GitObjectID!, $message: String!, $path1: String!, $contents1: Base64String!, $path2: String!, $contents2: Base64String!) {
+              createCommitOnBranch(input: {
+                branch: {repositoryNameWithOwner: $repo, branchName: "main"},
+                expectedHeadOid: $head,
+                message: {headline: $message},
+                fileChanges: {additions: [{path: $path1, contents: $contents1}, {path: $path2, contents: $contents2}]}
+              }) { commit { oid } }
+            }' --jq '.data.createCommitOnBranch.commit.oid'
+          echo "v$VERSION fully released"
+
+  # ── Announce ─────────────────────────────────────────────────────
+  # Chained as a job (not an `on: release` workflow) because releases
+  # created with GITHUB_TOKEN never emit chained workflow events.
+  # Dispatch mode=announce re-posts an already-published release
+  # (build is skipped then, so the version comes from the input).
+  notify:
+    name: Post release changelog to Discord
+    needs: build
+    if: >-
+      !cancelled() &&
+      ((github.event_name == 'push' && needs.build.result == 'success') ||
+       (github.event_name == 'workflow_dispatch' && inputs.mode == 'announce'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: version
+        run: |
+          set -e
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            if [ -z "$VERSION" ]; then
+              echo "::error::announce mode needs the version input (e.g. 0.4.0)"
+              exit 1
+            fi
+          else
+            VERSION="${{ needs.build.outputs.version }}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v6
+        with:
+          ref: v${{ steps.version.outputs.version }}
+          submodules: false
+
+      - name: Extract release notes
+        id: notes
+        run: |
+          set -e
+          VERSION="${{ steps.version.outputs.version }}"
+          # Command substitution strips trailing newlines. Printf puts
+          # exactly one back so the heredoc delimiter sits on its own
+          # line (extract-changelog.sh output has no trailing newline).
+          BODY="$(scripts/extract-changelog.sh "$VERSION")"
+          {
+            echo "body<<EMPO_NOTES_EOF"
+            printf '%s\n' "$BODY"
+            echo "EMPO_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Send release to Discord
+        uses: SethCohen/github-releases-to-discord@v1
+        with:
+          webhook_url: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          username: Empo Releases
+          footer_title: Empo Release Notes
+          reduce_headings: true
+          release_name: v${{ steps.version.outputs.version }}
+          release_body: ${{ steps.notes.outputs.body }}
+          release_html_url: https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.version }}
