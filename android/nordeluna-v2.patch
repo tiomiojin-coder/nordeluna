@@ -1,0 +1,282 @@
+diff --git a/android/app/build.gradle b/android/app/build.gradle
+index a500fde..44dd91b 100644
+--- a/android/app/build.gradle
++++ b/android/app/build.gradle
+@@ -10,8 +10,8 @@ android {
+         applicationId "com.tiomi.nordeluna"
+         minSdk 21
+         targetSdk 33
+-        versionCode 1
+-        versionName "1.0.0"
++        versionCode 2
++        versionName "1.1.0"
+         archivesBaseName = "Nordeluna-Android-$versionName"
+         // Native ABIs are produced by build.sh (see ../build.sh) and placed
+         // under src/main/jniLibs/. Everything present there is packaged.
+diff --git a/android/app/src/main/java/com/mkxpz/MainActivity.java b/android/app/src/main/java/com/mkxpz/MainActivity.java
+index d1a58fc..ac45553 100644
+--- a/android/app/src/main/java/com/mkxpz/MainActivity.java
++++ b/android/app/src/main/java/com/mkxpz/MainActivity.java
+@@ -10,12 +10,13 @@ import android.content.Intent;
+ import android.content.SharedPreferences;
+ import android.content.pm.ActivityInfo;
+ import android.content.pm.PackageManager;
++import android.media.AudioManager;
+ import android.view.View;
+ import android.view.KeyEvent;
+ import android.view.MotionEvent;
+ import android.view.ViewGroup.LayoutParams;
+ import android.widget.TextView;
+-import android.widget.LinearLayout;
++import android.widget.RelativeLayout;
+ import android.widget.Toast;
+ import android.graphics.Color;
+ import android.graphics.Typeface;
+@@ -92,6 +93,8 @@ public class MainActivity extends SDLActivity
+ 
+     // Slide-out launcher menu
+     private SideMenu mSideMenu;
++    private AudioManager mAudioManager;
++    private final AudioManager.OnAudioFocusChangeListener mAudioFocusListener = focusChange -> { };
+     private boolean mEdgeTracking = false;
+     private float mEdgeStartRawX = 0f;
+ 
+@@ -178,6 +181,12 @@ public class MainActivity extends SDLActivity
+         GAME_PATH_DEFAULT = new File(gameRootBase, "mkxp-z").getAbsolutePath();
+         GAME_PATH = GAME_PATH_DEFAULT;
+ 
++        // Route the hardware volume keys to media volume and explicitly take
++        // audio focus while the game is in the foreground. This avoids silent
++        // playback on devices/emulators that leave SDL on the wrong stream.
++        setVolumeControlStream(AudioManager.STREAM_MUSIC);
++        mAudioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
++
+         mMainHandler = new Handler(getMainLooper());
+ 
+         mStorageManager = (StorageManager) getSystemService(STORAGE_SERVICE);
+@@ -222,8 +231,11 @@ public class MainActivity extends SDLActivity
+         tvFps.setPadding(dpPx(10), dpPx(4), dpPx(10), dpPx(4));
+         tvFps.setVisibility(View.GONE);
+ 
+-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+-        params.setMargins(16, 16, 0, 0);
++        RelativeLayout.LayoutParams params = new RelativeLayout.LayoutParams(
++            LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
++        params.addRule(RelativeLayout.ALIGN_PARENT_TOP);
++        params.addRule(RelativeLayout.ALIGN_PARENT_END);
++        params.setMargins(0, dpPx(16), dpPx(16), 0);
+         tvFps.setLayoutParams(params);
+ 
+         mLayout.addView(tvFps);
+@@ -236,7 +248,7 @@ public class MainActivity extends SDLActivity
+         }
+ 
+         // Restore the FPS overlay toggle.
+-        fpsOverlayEnabled = prefs.getBoolean(PREFS_FPS_OVERLAY, false);
++        fpsOverlayEnabled = prefs.getBoolean(PREFS_FPS_OVERLAY, true);
+ 
+         // Setup the slide-out game launcher menu (on top of the SDL surface).
+         mSideMenu = new SideMenu(this, mLayout);
+@@ -278,6 +290,27 @@ public class MainActivity extends SDLActivity
+         }
+     }
+ 
++    @Override
++    protected void onResume()
++    {
++        super.onResume();
++        if (mAudioManager != null) {
++            mAudioManager.requestAudioFocus(
++                mAudioFocusListener,
++                AudioManager.STREAM_MUSIC,
++                AudioManager.AUDIOFOCUS_GAIN
++            );
++        }
++    }
++
++    @Override
++    protected void onPause()
++    {
++        if (mAudioManager != null)
++            mAudioManager.abandonAudioFocus(mAudioFocusListener);
++        super.onPause();
++    }
++
+     @Override
+     protected void onDestroy()
+     {
+diff --git a/android/app/src/main/java/com/mkxpz/gamepad/Gamepad.java b/android/app/src/main/java/com/mkxpz/gamepad/Gamepad.java
+index 0e8b645..2fba083 100644
+--- a/android/app/src/main/java/com/mkxpz/gamepad/Gamepad.java
++++ b/android/app/src/main/java/com/mkxpz/gamepad/Gamepad.java
+@@ -12,6 +12,7 @@ import android.widget.RelativeLayout;
+ 
+ import com.mkxpz.R;
+ import com.mkxpz.utils.ViewUtils;
++import org.libsdl.app.SDLControllerManager;
+ 
+ public class Gamepad
+ {
+@@ -55,6 +56,8 @@ public class Gamepad
+     private GamepadButton gpadBtnCTRL;
+     private GamepadButton gpadBtnALT;
+     private GamepadButton gpadBtnSHIFT;
++    private int mFallbackHorizontalKey = KeyEvent.KEYCODE_UNKNOWN;
++    private int mFallbackVerticalKey = KeyEvent.KEYCODE_UNKNOWN;
+ 
+     public void init(GamepadConfig gpadConfig, boolean invisible)
+     {
+@@ -158,14 +161,44 @@ public class Gamepad
+     }
+ 
+     /**
+-     * Returns true when {@code keycode} is one of Android's gamepad button
+-     * keycodes (face, shoulder, thumb-stick or start/select buttons), as
+-     * opposed to DPAD or other keys.
++     * Maps Android gamepad buttons to the keyboard bindings used by RGSS1.
++     * SDL handles known controllers directly; this is a compatibility path
++     * for inexpensive Bluetooth pads that Android exposes without an SDL
++     * controller mapping.
+      */
+-    private boolean isGamepadButtonKeycode(int keycode)
++    private int fallbackKeyForButton(int keycode)
+     {
+-        return (keycode >= KeyEvent.KEYCODE_BUTTON_A && keycode <= KeyEvent.KEYCODE_BUTTON_MODE)
+-            || (keycode >= KeyEvent.KEYCODE_BUTTON_1 && keycode <= KeyEvent.KEYCODE_BUTTON_16);
++        switch (keycode) {
++            case KeyEvent.KEYCODE_BUTTON_A:
++            case KeyEvent.KEYCODE_DPAD_CENTER:
++            case KeyEvent.KEYCODE_BUTTON_START:
++                return KeyEvent.KEYCODE_C;
++            case KeyEvent.KEYCODE_BUTTON_B:
++            case KeyEvent.KEYCODE_BUTTON_SELECT:
++            case KeyEvent.KEYCODE_BUTTON_MODE:
++                return KeyEvent.KEYCODE_X;
++            case KeyEvent.KEYCODE_BUTTON_X:
++                return KeyEvent.KEYCODE_Z;
++            case KeyEvent.KEYCODE_BUTTON_Y:
++                return KeyEvent.KEYCODE_A;
++            case KeyEvent.KEYCODE_BUTTON_L1:
++                return KeyEvent.KEYCODE_Q;
++            case KeyEvent.KEYCODE_BUTTON_R1:
++                return KeyEvent.KEYCODE_W;
++            case KeyEvent.KEYCODE_BUTTON_L2:
++            case KeyEvent.KEYCODE_BUTTON_THUMBL:
++                return KeyEvent.KEYCODE_S;
++            case KeyEvent.KEYCODE_BUTTON_R2:
++            case KeyEvent.KEYCODE_BUTTON_THUMBR:
++                return KeyEvent.KEYCODE_D;
++            case KeyEvent.KEYCODE_DPAD_UP:
++            case KeyEvent.KEYCODE_DPAD_DOWN:
++            case KeyEvent.KEYCODE_DPAD_LEFT:
++            case KeyEvent.KEYCODE_DPAD_RIGHT:
++                return keycode;
++            default:
++                return KeyEvent.KEYCODE_UNKNOWN;
++        }
+     }
+ 
+     public boolean processGamepadEvent(KeyEvent evt)
+@@ -185,22 +218,25 @@ public class Gamepad
+ 
+         int keycode = evt.getKeyCode();
+ 
+-        // Physical gamepad buttons are handled natively by SDL, which turns
+-        // them into SDL_CONTROLLERBUTTON* events that mkxp-z's input system
+-        // already understands. Forwarding them here as raw keyboard keycodes
+-        // would only produce SDL_SCANCODE_UNKNOWN and swallow the press.
+-        if (isGamepadButtonKeycode(keycode))
++        // Known USB/Bluetooth controllers keep SDL's native mapping, including
++        // analog sticks. Unknown pads use the keyboard compatibility map.
++        if (SDLControllerManager.isDeviceSDLJoystick(evt.getDeviceId()))
++            return false;
++
++        int mappedKey = fallbackKeyForButton(keycode);
++        if (mappedKey == KeyEvent.KEYCODE_UNKNOWN)
+             return false;
+ 
+         switch (evt.getAction())
+         {
+             case MotionEvent.ACTION_DOWN:
+-                mOnKeyDownListener.onKeyDown(keycode);
++                if (evt.getRepeatCount() == 0)
++                    mOnKeyDownListener.onKeyDown(mappedKey);
+                 break;
+ 
+             case MotionEvent.ACTION_CANCEL:
+             case MotionEvent.ACTION_UP:
+-                mOnKeyUpListener.onKeyUp(keycode);
++                mOnKeyUpListener.onKeyUp(mappedKey);
+                 break;
+         }
+ 
+@@ -216,38 +252,43 @@ public class Gamepad
+ 
+         int sources = device.getSources();
+ 
+-        if (((sources & InputDevice.SOURCE_DPAD) != InputDevice.SOURCE_DPAD))
++        if (
++            ((sources & InputDevice.SOURCE_DPAD) != InputDevice.SOURCE_DPAD) &&
++            ((sources & InputDevice.SOURCE_JOYSTICK) != InputDevice.SOURCE_JOYSTICK)
++        )
++            return false;
++
++        if (SDLControllerManager.isDeviceSDLJoystick(evt.getDeviceId()))
+             return false;
+ 
+         float xAxis = evt.getAxisValue(MotionEvent.AXIS_HAT_X);
+         float yAxis = evt.getAxisValue(MotionEvent.AXIS_HAT_Y);
+ 
+-        Integer keycode = null;
++        // Some Bluetooth pads report only analog axes and no HAT axes.
++        if (Math.abs(xAxis) < 0.5f)
++            xAxis = evt.getAxisValue(MotionEvent.AXIS_X);
++        if (Math.abs(yAxis) < 0.5f)
++            yAxis = evt.getAxisValue(MotionEvent.AXIS_Y);
+ 
+-        if (Float.compare(yAxis, -1.0f) == 0)
+-            keycode = KeyEvent.KEYCODE_DPAD_UP;
+-        else if (Float.compare(yAxis, 1.0f) == 0)
+-            keycode = KeyEvent.KEYCODE_DPAD_DOWN;
+-        else if (Float.compare(xAxis, -1.0f) == 0)
+-            keycode = KeyEvent.KEYCODE_DPAD_LEFT;
+-        else if (Float.compare(xAxis, 1.0f) == 0)
+-            keycode = KeyEvent.KEYCODE_DPAD_RIGHT;
++        int horizontal = xAxis < -0.5f ? KeyEvent.KEYCODE_DPAD_LEFT :
++            (xAxis > 0.5f ? KeyEvent.KEYCODE_DPAD_RIGHT : KeyEvent.KEYCODE_UNKNOWN);
++        int vertical = yAxis < -0.5f ? KeyEvent.KEYCODE_DPAD_UP :
++            (yAxis > 0.5f ? KeyEvent.KEYCODE_DPAD_DOWN : KeyEvent.KEYCODE_UNKNOWN);
+ 
+-        if (keycode == null)
+-            return false;
+-
+-        switch (evt.getAction())
+-        {
+-            case MotionEvent.ACTION_DOWN:
+-                mOnKeyDownListener.onKeyDown(keycode);
+-                break;
+-
+-            case MotionEvent.ACTION_CANCEL:
+-            case MotionEvent.ACTION_UP:
+-                mOnKeyUpListener.onKeyUp(keycode);
+-                break;
+-        }
++        mFallbackHorizontalKey = updateFallbackDirection(mFallbackHorizontalKey, horizontal);
++        mFallbackVerticalKey = updateFallbackDirection(mFallbackVerticalKey, vertical);
+ 
+         return true;
+     }
+-}
+\ No newline at end of file
++
++    private int updateFallbackDirection(int previousKey, int nextKey)
++    {
++        if (previousKey == nextKey)
++            return previousKey;
++        if (previousKey != KeyEvent.KEYCODE_UNKNOWN)
++            mOnKeyUpListener.onKeyUp(previousKey);
++        if (nextKey != KeyEvent.KEYCODE_UNKNOWN)
++            mOnKeyDownListener.onKeyDown(nextKey);
++        return nextKey;
++    }
++}

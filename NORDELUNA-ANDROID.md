@@ -9,8 +9,8 @@ privada do aplicativo; as aberturas seguintes iniciam diretamente no jogo.
 1. Abra a aba **Actions** do repositório.
 2. Selecione **Build Nordeluna APK**.
 3. Clique em **Run workflow** e aguarde o sinal verde.
-4. Abra a execução e baixe o artefato **Nordeluna-Android-arm64**.
-5. Extraia o ZIP do artefato e envie `Nordeluna-Android-arm64.apk` ao Android.
+4. Abra a execução e baixe o artefato **Nordeluna-Android-arm64-v1.1**.
+5. Extraia o ZIP do artefato e envie `Nordeluna-Android-arm64-v1.1.apk` ao Android.
 6. No telefone, permita a instalação de apps dessa fonte e abra o APK.
 
 O APK é assinado com a chave de depuração criada pelo GitHub Actions. Uma
@@ -23,6 +23,16 @@ lateral antes de trocar de versão.
 - Bibliotecas nativas: APK oficial `uranium-android@0.2.0`, validado por SHA-256.
 - Arquivo do jogo: reconstruído das partes privadas e validado por SHA-256.
 - Arquitetura: `arm64-v8a`.
+
+## Recursos da versão 1.1
+
+- contador de FPS habilitado por padrão no canto superior direito;
+- controles Bluetooth/USB pelo SDL e mapeamento alternativo para controles
+  Android sem perfil reconhecido;
+- foco de áudio no canal de mídia do Android;
+- músicas MIDI e o MP3 isolado convertidos para OGG durante a compilação;
+- mais canais simultâneos para efeitos sonoros e cache de caminhos para nomes
+  com diferenças de maiúsculas, minúsculas ou acentos.
 
 O suporte do mkxp-z Android ainda é experimental. O APK pode compilar e instalar
 corretamente, mas a compatibilidade completa de plugins do Essentials 21.1 só
