@@ -9,7 +9,6 @@ on:
       - .github/workflows/nordeluna-android.yml
       - android/**
       - game-assets/**
-      - ios/Nordeluna/Assets.xcassets/AppIcon.appiconset/nordeluna-appicon-1024-rgb.png
 
 permissions:
   contents: read
@@ -23,7 +22,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 45
 
     steps:
       - name: Checkout Nordeluna
@@ -43,60 +42,18 @@ jobs:
           echo "$GAME_ARCHIVE_SHA256  build-android/nordeluna-game.zip" | sha256sum --check --strict
           unzip -tq build-android/nordeluna-game.zip
 
-      - name: Prepare Android-compatible audio
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            autoconf automake build-essential cmake ffmpeg fluidsynth \
-            libtool meson nasm ninja-build pkg-config wget
-          bash scripts/prepare-android-game.sh \
-            build-android/nordeluna-game.zip \
-            build-android/nordeluna-android-game.zip
-
       - name: Fetch pinned Android engine source
         run: |
           set -euo pipefail
           git clone --no-checkout https://codeberg.org/warmwinter/mkxp-z.git build-android/mkxp-z
           git -C build-android/mkxp-z checkout "$MKXP_Z_COMMIT"
           git -C build-android/mkxp-z apply "$GITHUB_WORKSPACE/android/nordeluna.patch"
-          git -C build-android/mkxp-z apply "$GITHUB_WORKSPACE/android/nordeluna-v2.patch"
-          git -C build-android/mkxp-z apply "$GITHUB_WORKSPACE/android/controller-fallback.patch"
-          git -C build-android/mkxp-z apply "$GITHUB_WORKSPACE/android/universal-x86.patch"
-
-      - name: Cache x86_64 native engine
-        uses: actions/cache@v4
-        with:
-          path: |
-            build-android/mkxp-z/android/deps
-            build-android/mkxp-z/android/build-x86_64
-            build-android/mkxp-z/android/app/src/main/jniLibs/x86_64
-          key: nordeluna-x86_64-${{ runner.os }}-${{ env.MKXP_Z_COMMIT }}-${{ hashFiles('android/*.patch') }}
 
       - name: Preserve sideload signing key
         uses: actions/cache@v4
         with:
           path: ~/.android/debug.keystore
           key: nordeluna-sideload-signing-v1
-
-      - name: Build native x86_64 engine for emulators
-        run: |
-          set -euo pipefail
-          if [[ -z "${ANDROID_NDK_HOME:-}" || ! -d "$ANDROID_NDK_HOME" ]]; then
-            if [[ -n "${ANDROID_NDK_ROOT:-}" && -d "$ANDROID_NDK_ROOT" ]]; then
-              export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
-            elif [[ -n "${ANDROID_NDK_LATEST_HOME:-}" && -d "$ANDROID_NDK_LATEST_HOME" ]]; then
-              export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
-            else
-              echo "Android NDK not found on the GitHub runner" >&2
-              exit 1
-            fi
-          fi
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> "$GITHUB_ENV"
-          chmod +x build-android/mkxp-z/android/build.sh
-          chmod +x build-android/mkxp-z/android/deps/get_deps.sh
-          cd build-android/mkxp-z/android
-          ABIS=x86_64 ./build.sh
 
       - name: Fetch pinned native Android libraries
         run: |
@@ -113,8 +70,8 @@ jobs:
           set -euo pipefail
           APP_MAIN=build-android/mkxp-z/android/app/src/main
           mkdir -p "$APP_MAIN/assets"
-          cp build-android/nordeluna-android-game.zip "$APP_MAIN/assets/nordeluna-game.zip"
-          cp ios/Nordeluna/Assets.xcassets/AppIcon.appiconset/nordeluna-appicon-1024-rgb.png \
+          cp build-android/nordeluna-game.zip "$APP_MAIN/assets/nordeluna-game.zip"
+          cp android/assets/nordeluna-appicon-1024-rgb.png \
             "$APP_MAIN/res/drawable/nordeluna_icon.png"
 
       - name: Build installable APK
@@ -132,22 +89,18 @@ jobs:
           APK="$(find build-android/mkxp-z/android/app/build/outputs/apk/debug -name '*.apk' -type f -print -quit)"
           test -n "$APK"
           unzip -l "$APK" | grep -F 'assets/nordeluna-game.zip'
-          for ABI in arm64-v8a x86_64; do
-            unzip -l "$APK" | grep -F "lib/$ABI/libmkxp-z.so"
-            unzip -l "$APK" | grep -F "lib/$ABI/libruby.so"
-            unzip -l "$APK" | grep -F "lib/$ABI/libSDL2.so"
-          done
-          cp "$APK" build-android/Nordeluna-Android-universal-v1.2.apk
-          sha256sum build-android/Nordeluna-Android-universal-v1.2.apk > build-android/Nordeluna-Android-universal-v1.2.apk.sha256
-          ls -lh build-android/Nordeluna-Android-universal-v1.2.apk
+          unzip -l "$APK" | grep -F 'lib/arm64-v8a/libmkxp-z.so'
+          cp "$APK" build-android/Nordeluna-Android-arm64-clean-v1.0.apk
+          sha256sum build-android/Nordeluna-Android-arm64-clean-v1.0.apk > build-android/Nordeluna-Android-arm64-clean-v1.0.apk.sha256
+          ls -lh build-android/Nordeluna-Android-arm64-clean-v1.0.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Nordeluna-Android-universal-v1.2
+          name: Nordeluna-Android-arm64-clean-v1.0
           path: |
-            build-android/Nordeluna-Android-universal-v1.2.apk
-            build-android/Nordeluna-Android-universal-v1.2.apk.sha256
+            build-android/Nordeluna-Android-arm64-clean-v1.0.apk
+            build-android/Nordeluna-Android-arm64-clean-v1.0.apk.sha256
           compression-level: 0
           retention-days: 14
 

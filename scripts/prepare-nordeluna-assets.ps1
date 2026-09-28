@@ -42,7 +42,7 @@ foreach ($directory in $runtimeDirectories) {
 }
 
 # Ambiente Python usado por ferramentas de desenvolvimento do projeto. O Ruby
-# do jogo nunca o carrega, e incluí-lo acrescentaria mais de 100 MB ao IPA.
+# do jogo nunca o carrega, e incluí-lo aumentaria desnecessariamente o APK.
 $pythonVenv = [System.IO.Path]::GetFullPath((Join-Path $staging 'Plugins\.venv'))
 Assert-ChildPath $pythonVenv $staging
 if (Test-Path -LiteralPath $pythonVenv) {

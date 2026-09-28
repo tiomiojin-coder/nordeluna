@@ -10,10 +10,11 @@ index 036a159..a500fde 100644
 +        applicationId "com.tiomi.nordeluna"
          minSdk 21
          targetSdk 33
-         versionCode 1
+-        versionCode 1
 -        versionName "0.1.0"
 -        archivesBaseName = "mkxp-z-$versionName"
-+        versionName "1.0.0"
++        versionCode 3
++        versionName "1.0.0-clean"
 +        archivesBaseName = "Nordeluna-Android-$versionName"
          // Native ABIs are produced by build.sh (see ../build.sh) and placed
          // under src/main/jniLibs/. Everything present there is packaged.
@@ -60,7 +61,8 @@ index a90712f..9389726 100644
 @@ -45,7 +45,7 @@
          <!-- Main activity -->
          <activity
-             android:name=".MainActivity"
+-            android:name=".MainActivity"
++            android:name="com.mkxpz.MainActivity"
 -            android:label="mkxp-z"
 +            android:label="Nordeluna"
              android:launchMode="singleTop"

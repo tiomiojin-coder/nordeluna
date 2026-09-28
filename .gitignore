@@ -1,113 +1,19 @@
-# Games (large, user-provided content)
-demo/
-
-# Build artifacts
-.build/
-ios/Empo/build/
-ios/Empo/Empo.xcodeproj/
-*.ipa
-
-# Docs site (Blume generates .blume/ and builds into dist/)
-# tools/changelog-page.ts derives this page from CHANGELOG.md.
-docs/changelog.mdx
-# tools/root-pages.ts derives these pages from the root markdown files.
-docs/privacy.mdx
-docs/terms.mdx
-docs/community.mdx
-.blume/
-dist/
-
-# Dependencies (downloaded sources and build outputs)
-ios/Dependencies/downloads/
-ios/Dependencies/build-*/
-
-# ANGLE prebuilt - hydrated at build time by tools/fetch-angle.sh
-# from a tagged release on github.com/mateo-m/empo-deps. The binaries
-# are too large for git (~80 MB) and version-pinned via
-# ios/Dependencies/ANGLE/.version (which IS tracked).
-ios/Dependencies/ANGLE/iphoneos/include/
-ios/Dependencies/ANGLE/iphoneos/lib/
-ios/Dependencies/ANGLE/iphonesimulator/include/
-ios/Dependencies/ANGLE/iphonesimulator/lib/
-ios/Dependencies/ANGLE/.fetched-version
-
-# Native deps (OpenSSL/SDL/Ruby/mkxp-merged) — hydrated by
-# tools/fetch-native-deps.sh from empo-deps release assets. Version-pinned
-# via ios/Dependencies/native/.version (tracked).
-ios/Dependencies/native/.fetched-version
-
-# Engine-core prebuilt (libmkxpz-core.a) — hydrated by
-# tools/fetch-engine-prebuilt.sh from mkxp-z-apple-mobile release assets.
-# Version-pinned via ios/Dependencies/engine/.version (tracked).
-ios/Dependencies/engine/.fetched-version
-
-# MetalANGLE.xcframework - unreferenced by the build, kept untracked
-# in case anything ever needs it. Currently not in the working tree.
-ios/Dependencies/Frameworks/
-
-# Xcode / DerivedData
-DerivedData/
-ios/Empo/.derivedData/
-*.xcworkspace
-xcuserdata/
-
-# Clangd / LSP cache
+# Arquivos temporários e de compilação
 .cache/
-compile_commands.json
+.game-pack-staging/
+build/
+build-android/
+game-assets.zip
 
-# macOS
-.DS_Store
-**/.DS_Store
-
-# Temporary files
+# Ferramentas locais
+__pycache__/
+*.pyc
 *.swp
 *.swo
 *~
-ios/Empo/src/App/GitInfo.generated.swift
+.DS_Store
 
-*.md
-!/docs/**/*.md
-!/ios/**/*.md
-!/CHANGELOG.md
-!/README.md
-!/CONTRIBUTING.md
-!/PRIVACY.md
-!/TERMS.md
-!/SUPPORT.md
-
-# Python cache (agent skill scripts)
-__pycache__/
-*.pyc
-
-# Per-contributor code signing config (see Signing.xcconfig.example)
-ios/Empo/Signing.xcconfig
-
-# Assets.bundle is assembled at build time from engine submodule sources.
-# Only .gitkeep is tracked to preserve the directory.
-ios/Empo/Assets.bundle/*
-!ios/Empo/Assets.bundle/.gitkeep
-
-# Bundled pure-Ruby stdlib, assembled at build time from the prebuilt
-# native-deps tree (see the "Assemble Ruby stdlib" phase in project.yml).
-ios/Empo/Ruby/
-# Node tool caches (CI uses bun + bun.lock instead).
-node_modules/
-
-# Build outputs (xcodebuild derived data, IPA artifacts).
-build/
-
-# Nordeluna single-game build inputs/outputs
-.cache/
-.game-pack-staging/
-game-assets.zip
-ios/Nordeluna/Frameworks/
-ios/Nordeluna/Nordeluna.xcodeproj/
-ios/Nordeluna/build/
-ios/Nordeluna/BundledGame/*
-!ios/Nordeluna/BundledGame/.gitkeep
-!/NORDELUNA-IOS.md
-!/NORDELUNA-ANDROID.md
-
-# Root-level local object files from ad-hoc builds
-/*.o
-.blume-verify/
+# Credenciais e saídas
+_github-credential-query.txt
+*.apk
+*.apk.sha256
