@@ -1,0 +1,15 @@
+diff --git a/android/app/build.gradle b/android/app/build.gradle
+index 44dd91b..806375f 100644
+--- a/android/app/build.gradle
++++ b/android/app/build.gradle
+@@ -10,8 +10,8 @@ android {
+         applicationId "com.tiomi.nordeluna"
+         minSdk 21
+         targetSdk 33
+-        versionCode 2
+-        versionName "1.1.0"
++        versionCode 3
++        versionName "1.2.0"
+         archivesBaseName = "Nordeluna-Android-$versionName"
+         // Native ABIs are produced by build.sh (see ../build.sh) and placed
+         // under src/main/jniLibs/. Everything present there is packaged.

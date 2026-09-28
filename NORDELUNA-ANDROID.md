@@ -1,16 +1,18 @@
 # Nordeluna para Android
 
-O workflow `Build Nordeluna APK` gera um APK `arm64` instalável, com o jogo
-incluído. Na primeira abertura, o app extrai os arquivos do jogo para a pasta
-privada do aplicativo; as aberturas seguintes iniciam diretamente no jogo.
+O workflow `Build Nordeluna APK` gera um APK universal instalável, com o jogo
+incluído. Ele contém código nativo `arm64-v8a` para aparelhos físicos e
+`x86_64` para emuladores como o BlueStacks. Na primeira abertura, o app extrai
+os arquivos do jogo para a pasta privada do aplicativo; as aberturas seguintes
+iniciam diretamente no jogo.
 
 ## Como gerar e baixar
 
 1. Abra a aba **Actions** do repositório.
 2. Selecione **Build Nordeluna APK**.
 3. Clique em **Run workflow** e aguarde o sinal verde.
-4. Abra a execução e baixe o artefato **Nordeluna-Android-arm64-v1.1**.
-5. Extraia o ZIP do artefato e envie `Nordeluna-Android-arm64-v1.1.apk` ao Android.
+4. Abra a execução e baixe o artefato **Nordeluna-Android-universal-v1.2**.
+5. Extraia o ZIP do artefato e use `Nordeluna-Android-universal-v1.2.apk`.
 6. No telefone, permita a instalação de apps dessa fonte e abra o APK.
 
 O APK é assinado com a chave de depuração criada pelo GitHub Actions. Uma
@@ -22,7 +24,15 @@ lateral antes de trocar de versão.
 - Engine Android: `warmwinter/mkxp-z`, fixada no commit informado no workflow.
 - Bibliotecas nativas: APK oficial `uranium-android@0.2.0`, validado por SHA-256.
 - Arquivo do jogo: reconstruído das partes privadas e validado por SHA-256.
-- Arquitetura: `arm64-v8a`.
+- Arquiteturas: `arm64-v8a` para aparelhos e `x86_64` para emuladores.
+
+## Correção da versão 1.2
+
+- núcleo x86_64 nativo para evitar o fechamento durante a inicialização no
+  BlueStacks;
+- mantém o núcleo ARM64 usado em aparelhos Android modernos;
+- o workflow confere as bibliotecas essenciais das duas arquiteturas antes de
+  publicar o APK.
 
 ## Recursos da versão 1.1
 

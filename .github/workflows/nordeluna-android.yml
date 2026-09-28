@@ -23,7 +23,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 180
 
     steps:
       - name: Checkout Nordeluna
@@ -47,7 +47,9 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg fluidsynth
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake build-essential cmake ffmpeg fluidsynth \
+            libtool meson nasm ninja-build pkg-config wget
           bash scripts/prepare-android-game.sh \
             build-android/nordeluna-game.zip \
             build-android/nordeluna-android-game.zip
@@ -60,6 +62,35 @@ jobs:
           git -C build-android/mkxp-z apply "$GITHUB_WORKSPACE/android/nordeluna.patch"
           git -C build-android/mkxp-z apply "$GITHUB_WORKSPACE/android/nordeluna-v2.patch"
           git -C build-android/mkxp-z apply "$GITHUB_WORKSPACE/android/controller-fallback.patch"
+          git -C build-android/mkxp-z apply "$GITHUB_WORKSPACE/android/universal-x86.patch"
+
+      - name: Cache x86_64 native engine
+        uses: actions/cache@v4
+        with:
+          path: |
+            build-android/mkxp-z/android/deps
+            build-android/mkxp-z/android/build-x86_64
+            build-android/mkxp-z/android/app/src/main/jniLibs/x86_64
+          key: nordeluna-x86_64-${{ runner.os }}-${{ env.MKXP_Z_COMMIT }}-${{ hashFiles('android/*.patch') }}
+
+      - name: Build native x86_64 engine for emulators
+        run: |
+          set -euo pipefail
+          if [[ -z "${ANDROID_NDK_HOME:-}" || ! -d "$ANDROID_NDK_HOME" ]]; then
+            if [[ -n "${ANDROID_NDK_ROOT:-}" && -d "$ANDROID_NDK_ROOT" ]]; then
+              export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
+            elif [[ -n "${ANDROID_NDK_LATEST_HOME:-}" && -d "$ANDROID_NDK_LATEST_HOME" ]]; then
+              export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+            else
+              echo "Android NDK not found on the GitHub runner" >&2
+              exit 1
+            fi
+          fi
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> "$GITHUB_ENV"
+          chmod +x build-android/mkxp-z/android/build.sh
+          chmod +x build-android/mkxp-z/android/deps/get_deps.sh
+          cd build-android/mkxp-z/android
+          ABIS=x86_64 ./build.sh
 
       - name: Fetch pinned native Android libraries
         run: |
@@ -95,17 +126,22 @@ jobs:
           APK="$(find build-android/mkxp-z/android/app/build/outputs/apk/debug -name '*.apk' -type f -print -quit)"
           test -n "$APK"
           unzip -l "$APK" | grep -F 'assets/nordeluna-game.zip'
-          cp "$APK" build-android/Nordeluna-Android-arm64-v1.1.apk
-          sha256sum build-android/Nordeluna-Android-arm64-v1.1.apk > build-android/Nordeluna-Android-arm64-v1.1.apk.sha256
-          ls -lh build-android/Nordeluna-Android-arm64-v1.1.apk
+          for ABI in arm64-v8a x86_64; do
+            unzip -l "$APK" | grep -F "lib/$ABI/libmkxp-z.so"
+            unzip -l "$APK" | grep -F "lib/$ABI/libruby.so"
+            unzip -l "$APK" | grep -F "lib/$ABI/libSDL2.so"
+          done
+          cp "$APK" build-android/Nordeluna-Android-universal-v1.2.apk
+          sha256sum build-android/Nordeluna-Android-universal-v1.2.apk > build-android/Nordeluna-Android-universal-v1.2.apk.sha256
+          ls -lh build-android/Nordeluna-Android-universal-v1.2.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Nordeluna-Android-arm64-v1.1
+          name: Nordeluna-Android-universal-v1.2
           path: |
-            build-android/Nordeluna-Android-arm64-v1.1.apk
-            build-android/Nordeluna-Android-arm64-v1.1.apk.sha256
+            build-android/Nordeluna-Android-universal-v1.2.apk
+            build-android/Nordeluna-Android-universal-v1.2.apk.sha256
           compression-level: 0
           retention-days: 14
 
