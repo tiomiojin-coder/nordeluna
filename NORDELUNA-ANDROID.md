@@ -16,8 +16,10 @@ iniciam diretamente no jogo.
 6. No telefone, permita a instalação de apps dessa fonte e abra o APK.
 
 O APK é assinado com a chave de depuração criada pelo GitHub Actions. Uma
-compilação futura pode exigir desinstalar a anterior; exporte o save pelo menu
-lateral antes de trocar de versão.
+instalação da versão 1.1 ou anterior precisa ser removida antes da 1.2, pois
+as chaves antigas eram temporárias. A partir da 1.2, o workflow preserva a chave
+de assinatura para permitir atualizações. Exporte o save pelo menu lateral antes
+de desinstalar uma versão antiga.
 
 ## Base técnica
 

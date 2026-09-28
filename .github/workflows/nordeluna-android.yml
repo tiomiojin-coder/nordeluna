@@ -73,6 +73,12 @@ jobs:
             build-android/mkxp-z/android/app/src/main/jniLibs/x86_64
           key: nordeluna-x86_64-${{ runner.os }}-${{ env.MKXP_Z_COMMIT }}-${{ hashFiles('android/*.patch') }}
 
+      - name: Preserve sideload signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: nordeluna-sideload-signing-v1
+
       - name: Build native x86_64 engine for emulators
         run: |
           set -euo pipefail
@@ -90,6 +96,8 @@ jobs:
           chmod +x build-android/mkxp-z/android/build.sh
           chmod +x build-android/mkxp-z/android/deps/get_deps.sh
           cd build-android/mkxp-z/android
+          export GEM_HOME="$PWD/deps/build-x86_64/lib/ruby/gems/3.1.0"
+          export GEM_PATH="$GEM_HOME"
           ABIS=x86_64 ./build.sh
 
       - name: Fetch pinned native Android libraries
