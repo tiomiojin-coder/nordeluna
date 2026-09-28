@@ -21,7 +21,7 @@ index 9e70621..017e502 100644
  	cd ruby && ($(MAKE) distclean 2>/dev/null || true) && \
  	DLDFLAGS="-Wl,-soname,libruby.so" $(CONFIGURE) $(RUBY_CONFIGURE_ARGS) && \
 -	$(MAKE) -j$(NPROC) && $(MAKE) install
-+	$(MAKE) -j$(NPROC) && $(MAKE) install INSTRUBY_ARGS="--exclude=gem"
++	$(MAKE) -j$(NPROC) && sed -i 's/--exclude=doc/--exclude=doc --exclude=gem/' uncommon.mk && $(MAKE) install
  	# We build libruby with "-Wl,-soname,libruby.so" so that both
  	# System.loadLibrary("ruby") and libmkxp-z.so's DT_NEEDED agree on a single
  	# "libruby.so" file. That flag would otherwise leak into ruby-3.1.pc's
