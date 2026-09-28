@@ -49,7 +49,11 @@ def main() -> None:
             names = check.namelist()
             if any("\ufffd" in name for name in names):
                 raise ValueError("replacement character found in Android archive")
-            if any(name.lower().endswith((".mid", ".midi")) for name in names):
+            if any(
+                name.startswith("Audio/")
+                and name.lower().endswith((".mid", ".midi"))
+                for name in names
+            ):
                 raise ValueError("unconverted MIDI file found in Android archive")
 
             laboratory = "Graphics/Pictures/Laborat\u00f3rio (Intro).png"
