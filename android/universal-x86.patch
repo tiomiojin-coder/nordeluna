@@ -13,3 +13,15 @@ index 44dd91b..806375f 100644
          archivesBaseName = "Nordeluna-Android-$versionName"
          // Native ABIs are produced by build.sh (see ../build.sh) and placed
          // under src/main/jniLibs/. Everything present there is packaged.
+diff --git a/android/deps/Makefile b/android/deps/Makefile
+index 9e70621..017e502 100644
+--- a/android/deps/Makefile
++++ b/android/deps/Makefile
+@@ -316,6 +316,6 @@
+ 	cd ruby && ($(MAKE) distclean 2>/dev/null || true) && \
+ 	DLDFLAGS="-Wl,-soname,libruby.so" $(CONFIGURE) $(RUBY_CONFIGURE_ARGS) && \
+-	$(MAKE) -j$(NPROC) && $(MAKE) install
++	$(MAKE) -j$(NPROC) && $(MAKE) install INSTRUBY_ARGS="--exclude=gem"
+ 	# We build libruby with "-Wl,-soname,libruby.so" so that both
+ 	# System.loadLibrary("ruby") and libmkxp-z.so's DT_NEEDED agree on a single
+ 	# "libruby.so" file. That flag would otherwise leak into ruby-3.1.pc's
