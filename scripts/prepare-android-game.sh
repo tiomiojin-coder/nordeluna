@@ -8,11 +8,12 @@ fi
 
 INPUT_ARCHIVE="$(realpath "$1")"
 OUTPUT_ARCHIVE="$(realpath -m "$2")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="$(mktemp -d)"
 GAME_DIR="$WORK_DIR/game"
 trap 'rm -rf "$WORK_DIR"' EXIT INT TERM
 
-for command in unzip zip ffmpeg fluidsynth; do
+for command in unzip python3 ffmpeg fluidsynth; do
   command -v "$command" >/dev/null || {
     echo "error: comando obrigatório ausente: $command" >&2
     exit 1
@@ -60,7 +61,7 @@ sed -i 's|^[[:space:]]*// "SESourceCount": 6,|    "SESourceCount": 16,|' "$GAME_
 sed -i 's|^[[:space:]]*// "pathCache": true,|    "pathCache": true,|' "$GAME_DIR/mkxp.json"
 
 rm -f "$OUTPUT_ARCHIVE"
-(cd "$GAME_DIR" && zip -q -X -r "$OUTPUT_ARCHIVE" .)
+python3 "$SCRIPT_DIR/pack-android-directory.py" "$GAME_DIR" "$OUTPUT_ARCHIVE"
 
 unzip -tq "$OUTPUT_ARCHIVE"
 test "$(find "$GAME_DIR/Audio" -type f \( -iname '*.mid' -o -iname '*.midi' \) | wc -l)" -eq 0

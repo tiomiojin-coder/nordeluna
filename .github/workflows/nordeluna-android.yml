@@ -9,6 +9,9 @@ on:
       - .github/workflows/nordeluna-android.yml
       - android/**
       - game-assets/**
+      - scripts/prepare-android-archive.py
+      - scripts/prepare-android-game.sh
+      - scripts/pack-android-directory.py
 
 permissions:
   contents: read
@@ -38,9 +41,22 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build-android
-          cat game-assets/game-assets.zip.part* > build-android/nordeluna-game.zip
-          echo "$GAME_ARCHIVE_SHA256  build-android/nordeluna-game.zip" | sha256sum --check --strict
-          unzip -tq build-android/nordeluna-game.zip
+          cat game-assets/game-assets.zip.part* > build-android/nordeluna-original.zip
+          echo "$GAME_ARCHIVE_SHA256  build-android/nordeluna-original.zip" | sha256sum --check --strict
+          unzip -tq build-android/nordeluna-original.zip
+
+      - name: Repair Android paths and audio
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fluidsynth
+          python3 scripts/prepare-android-archive.py \
+            build-android/nordeluna-original.zip \
+            build-android/nordeluna-utf8.zip \
+            android/mkxp-android.json
+          bash scripts/prepare-android-game.sh \
+            build-android/nordeluna-utf8.zip \
+            build-android/nordeluna-game.zip
 
       - name: Fetch pinned Android engine source
         run: |
@@ -90,17 +106,17 @@ jobs:
           test -n "$APK"
           unzip -l "$APK" | grep -F 'assets/nordeluna-game.zip'
           unzip -l "$APK" | grep -F 'lib/arm64-v8a/libmkxp-z.so'
-          cp "$APK" build-android/Nordeluna-Android-arm64-clean-v1.0.apk
-          sha256sum build-android/Nordeluna-Android-arm64-clean-v1.0.apk > build-android/Nordeluna-Android-arm64-clean-v1.0.apk.sha256
-          ls -lh build-android/Nordeluna-Android-arm64-clean-v1.0.apk
+          cp "$APK" build-android/Nordeluna-Android-arm64-v1.1.apk
+          sha256sum build-android/Nordeluna-Android-arm64-v1.1.apk > build-android/Nordeluna-Android-arm64-v1.1.apk.sha256
+          ls -lh build-android/Nordeluna-Android-arm64-v1.1.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Nordeluna-Android-arm64-clean-v1.0
+          name: Nordeluna-Android-arm64-v1.1
           path: |
-            build-android/Nordeluna-Android-arm64-clean-v1.0.apk
-            build-android/Nordeluna-Android-arm64-clean-v1.0.apk.sha256
+            build-android/Nordeluna-Android-arm64-v1.1.apk
+            build-android/Nordeluna-Android-arm64-v1.1.apk.sha256
           compression-level: 0
           retention-days: 14
 

@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""Repackage Nordeluna with Android-safe UTF-8 paths and configuration."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import tempfile
+import unicodedata
+import zipfile
+from pathlib import Path, PurePosixPath
+
+
+LEGACY_FILENAME_ENCODING = "cp850"
+
+
+def normalized_name(name: str) -> str:
+    """Return a safe NFC-normalized archive path."""
+    normalized = unicodedata.normalize("NFC", name.replace("\\", "/"))
+    path = PurePosixPath(normalized)
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"unsafe path in archive: {name!r}")
+    return normalized
+
+
+def copy_info(source: zipfile.ZipInfo, filename: str) -> zipfile.ZipInfo:
+    """Copy stable ZIP metadata while allowing Python to emit UTF-8 names."""
+    target = zipfile.ZipInfo(filename=filename, date_time=source.date_time)
+    target.compress_type = source.compress_type
+    target.comment = source.comment
+    target.create_system = source.create_system
+    target.create_version = source.create_version
+    target.extract_version = source.extract_version
+    target.external_attr = source.external_attr
+    target.internal_attr = source.internal_attr
+    # Do not retain legacy Unicode/path extras. zipfile writes the normalized
+    # filename itself and sets the UTF-8 flag whenever it is required.
+    return target
+
+
+def prepare_archive(input_path: Path, output_path: Path, config_path: Path) -> None:
+    config = config_path.read_bytes()
+    json.loads(config.decode("utf-8"))
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{output_path.name}.", suffix=".tmp", dir=output_path.parent
+    )
+    os.close(fd)
+    temporary_path = Path(temporary_name)
+
+    repaired_names: list[str] = []
+    seen: set[str] = set()
+    config_replacements = 0
+
+    try:
+        # The original archive was made on Windows with CP850 filenames and
+        # without ZIP's UTF-8 flag. Android's Java extractor otherwise turns
+        # accented characters into U+FFFD, making referenced assets invisible.
+        with zipfile.ZipFile(
+            input_path, "r", metadata_encoding=LEGACY_FILENAME_ENCODING
+        ) as source, zipfile.ZipFile(
+            temporary_path, "w", allowZip64=True
+        ) as target:
+            for entry in source.infolist():
+                name = normalized_name(entry.filename)
+                key = name.casefold()
+                if key in seen:
+                    raise ValueError(f"duplicate normalized path: {name}")
+                seen.add(key)
+
+                if any(ord(character) > 127 for character in name):
+                    repaired_names.append(name)
+
+                out_info = copy_info(entry, name)
+                if name.removeprefix("./") == "mkxp.json":
+                    target.writestr(out_info, config)
+                    config_replacements += 1
+                    continue
+
+                with source.open(entry, "r") as source_file, target.open(
+                    out_info, "w", force_zip64=True
+                ) as target_file:
+                    shutil.copyfileobj(source_file, target_file, length=1024 * 1024)
+
+        if config_replacements != 1:
+            raise ValueError(
+                f"expected one mkxp.json, replaced {config_replacements}"
+            )
+
+        with zipfile.ZipFile(temporary_path, "r") as check:
+            check.testzip()
+            names = check.namelist()
+            if any("\ufffd" in name for name in names):
+                raise ValueError("replacement character found after repackaging")
+            if "./Graphics/Pictures/Laboratório (Intro).png" not in names:
+                raise ValueError("intro laboratory background is missing")
+
+        os.replace(temporary_path, output_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+    print(
+        f"Android archive ready: {len(repaired_names)} accented paths encoded as UTF-8"
+    )
+    for name in repaired_names:
+        print(f"  {name}")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input", type=Path)
+    parser.add_argument("output", type=Path)
+    parser.add_argument("config", type=Path)
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    prepare_archive(args.input, args.output, args.config)

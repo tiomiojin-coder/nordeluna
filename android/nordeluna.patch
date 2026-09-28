@@ -13,8 +13,8 @@ index 036a159..a500fde 100644
 -        versionCode 1
 -        versionName "0.1.0"
 -        archivesBaseName = "mkxp-z-$versionName"
-+        versionCode 3
-+        versionName "1.0.0-clean"
++        versionCode 4
++        versionName "1.1.0"
 +        archivesBaseName = "Nordeluna-Android-$versionName"
          // Native ABIs are produced by build.sh (see ../build.sh) and placed
          // under src/main/jniLibs/. Everything present there is packaged.
@@ -88,15 +88,16 @@ diff --git a/android/app/src/main/java/com/mkxpz/MainActivity.java b/android/app
 index be544a2..d1a58fc 100644
 --- a/android/app/src/main/java/com/mkxpz/MainActivity.java
 +++ b/android/app/src/main/java/com/mkxpz/MainActivity.java
-@@ -65,6 +65,7 @@ public class MainActivity extends SDLActivity
+@@ -65,6 +65,8 @@ public class MainActivity extends SDLActivity
  
      private static final String PREFS_NAME = "mkxpz_prefs";
      private static final String PREFS_GAME_PATH = "game_path";
 +    private static final String BUNDLED_GAME_ASSET = "nordeluna-game.zip";
++    private static final String PREFS_BUNDLED_VERSION = "bundled_game_version";
      private static final String PREFS_FPS_OVERLAY = "fps_overlay_enabled";
      private static final int REQUEST_LOAD_ARCHIVE = 200;
      private static final int REQUEST_IMPORT_SAVES = 201;
-@@ -87,6 +88,7 @@ public class MainActivity extends SDLActivity
+@@ -87,6 +89,7 @@ public class MainActivity extends SDLActivity
      // In-screen gamepad
      private final Gamepad mGamepad = new Gamepad();
      private boolean mGamepadInvisible = false;
@@ -104,7 +105,14 @@ index be544a2..d1a58fc 100644
  
      // Slide-out launcher menu
      private SideMenu mSideMenu;
-@@ -267,10 +269,8 @@ public class MainActivity extends SDLActivity
+@@ -264,14 +267,14 @@ public class MainActivity extends SDLActivity
+                 mStorageManager.mountObb(OBB_MAIN_FILENAME, null, obbListener);
+-            } else if (hasGame(new File(GAME_PATH))) {
++            } else if (hasGame(new File(GAME_PATH)) &&
++                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(
++                        PREFS_BUNDLED_VERSION, 0) == BuildConfig.VERSION_CODE) {
+                 Log.v(TAG, "Game found in " + GAME_PATH + ", starting");
+
                  // Run from the game directory
                  runSDLThread();
              } else {
@@ -112,19 +120,19 @@ index be544a2..d1a58fc 100644
 -
 -                // No game yet: let the user load one through the slide-out menu.
 -                mSideMenu.open();
-+                Log.v(TAG, "No game found in " + GAME_PATH + ", installing bundled game");
++                Log.v(TAG, "Installing bundled game version " + BuildConfig.VERSION_CODE);
 +                installBundledGame();
              }
          } else {
              // onStart: Resume SDL thread
-@@ -681,6 +681,76 @@ public class MainActivity extends SDLActivity
+@@ -681,6 +684,78 @@ public class MainActivity extends SDLActivity
          }).start();
      }
  
 +    /**
 +     * Installs the game archive bundled inside this standalone APK on first
-+     * launch. Later launches reuse the extracted files and go straight to the
-+     * game, while the side menu remains available for saves and diagnostics.
++     * launch and after an app update. Later launches reuse the extracted files
++     * and go straight to the game.
 +     */
 +    private void installBundledGame()
 +    {
@@ -184,6 +192,8 @@ index be544a2..d1a58fc 100644
 +
 +                GAME_PATH = gameFolder.getAbsolutePath();
 +                persistGamePath(GAME_PATH);
++                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putInt(
++                    PREFS_BUNDLED_VERSION, BuildConfig.VERSION_CODE).apply();
 +                mSideMenu.setGamePath(GAME_PATH);
 +                mSideMenu.close();
 +                runSDLThread();

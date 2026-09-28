@@ -1,0 +1,30 @@
+{
+  "windowTitle": "Pokemon Nordeluna",
+  "defScreenW": 512,
+  "defScreenH": 384,
+  "bindingNames": {
+    "c": "Use",
+    "b": "Back",
+    "a": "Action",
+    "x": "JumpUp",
+    "y": "JumpDown",
+    "z": "Special",
+    "l": "Unused",
+    "r": "Unused"
+  },
+  "dataPathApp": "Pokemon Nordeluna",
+  "dataPathOrg": "Nordeluna",
+  "pathCache": true,
+  "SESourceCount": 16,
+  "midiSoundFont": "soundfont.sf2",
+  "fullscreen": true,
+  "fixedAspectRatio": true,
+  "integerScalingActive": false,
+  "integerScalingLastMile": true,
+  "smoothScaling": 1,
+  "fontHeightReporting": 1,
+  "fontOutlineCrop": false,
+  "subImageFix": true,
+  "vsync": true,
+  "syncToRefreshrate": true
+}
