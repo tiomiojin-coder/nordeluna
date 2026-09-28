@@ -106,6 +106,7 @@ ios/Nordeluna/build/
 ios/Nordeluna/BundledGame/*
 !ios/Nordeluna/BundledGame/.gitkeep
 !/NORDELUNA-IOS.md
+!/NORDELUNA-ANDROID.md
 
 # Root-level local object files from ad-hoc builds
 /*.o

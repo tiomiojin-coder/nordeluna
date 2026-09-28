@@ -1,0 +1,215 @@
+diff --git a/android/app/build.gradle b/android/app/build.gradle
+index 036a159..a500fde 100644
+--- a/android/app/build.gradle
++++ b/android/app/build.gradle
+@@ -7,12 +7,12 @@ android {
+     compileSdk 33
+ 
+     defaultConfig {
+-        applicationId "com.mkxpz"
++        applicationId "com.tiomi.nordeluna"
+         minSdk 21
+         targetSdk 33
+         versionCode 1
+-        versionName "0.1.0"
+-        archivesBaseName = "mkxp-z-$versionName"
++        versionName "1.0.0"
++        archivesBaseName = "Nordeluna-Android-$versionName"
+         // Native ABIs are produced by build.sh (see ../build.sh) and placed
+         // under src/main/jniLibs/. Everything present there is packaged.
+     }
+@@ -44,6 +44,10 @@ android {
+             jniLibs.srcDirs = ['src/main/jniLibs']
+         }
+     }
++
++    aaptOptions {
++        noCompress 'zip'
++    }
+ }
+ 
+ dependencies {
+@@ -51,14 +55,4 @@ dependencies {
+     implementation 'com.intuit.sdp:sdp-android:1.1.0'
+ }
+ 
+-// Build the native mkxp-z shared library (and its dependencies) with Meson
+-// before packaging. build.sh is idempotent and skips ABIs that are already
+-// built, so incremental Android Studio builds stay fast.
+-def buildNative = tasks.register('buildNative', Exec) {
+-    workingDir rootProject.projectDir
+-    commandLine 'bash', 'build.sh'
+-}
+-
+-tasks.named('preBuild') {
+-    dependsOn buildNative
+-}
++// Native libraries are copied from the pinned upstream reference APK by CI.
+diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
+index a90712f..9389726 100644
+--- a/android/app/src/main/AndroidManifest.xml
++++ b/android/app/src/main/AndroidManifest.xml
+@@ -34,6 +34,6 @@
+     <application
+         android:label="@string/app_name"
+-        android:icon="@drawable/ic_launcher"
++        android:icon="@drawable/nordeluna_icon"
+         android:theme="@style/AppTheme"
+         android:appCategory="game"
+         android:isGame="true"
+@@ -45,7 +45,7 @@
+         <!-- Main activity -->
+         <activity
+             android:name=".MainActivity"
+-            android:label="mkxp-z"
++            android:label="Nordeluna"
+             android:launchMode="singleTop"
+             android:alwaysRetainTaskState="true"
+             android:screenOrientation="sensorLandscape"
+@@ -72,15 +72,5 @@
+             <meta-data android:name="com.samsung.android.multidisplay.keep_process_alive" android:value="true" />
+         </activity>
+ 
+-        <!-- Main activity + Debug mode -->
+-        <!-- You can remove or disable this if not needed -->
+-        <activity-alias
+-            android:name="MainDebugActivity"
+-            android:label="mkxp-z (Debug)"
+-            android:targetActivity=".MainActivity"
+-            android:exported="true"
+-        >
+-            <meta-data android:name="mkxp_debug" android:value="true" />
+-        </activity-alias>
+     </application>
+ </manifest>
+diff --git a/android/app/src/main/java/com/mkxpz/MainActivity.java b/android/app/src/main/java/com/mkxpz/MainActivity.java
+index be544a2..d1a58fc 100644
+--- a/android/app/src/main/java/com/mkxpz/MainActivity.java
++++ b/android/app/src/main/java/com/mkxpz/MainActivity.java
+@@ -65,6 +65,7 @@ public class MainActivity extends SDLActivity
+ 
+     private static final String PREFS_NAME = "mkxpz_prefs";
+     private static final String PREFS_GAME_PATH = "game_path";
++    private static final String BUNDLED_GAME_ASSET = "nordeluna-game.zip";
+     private static final String PREFS_FPS_OVERLAY = "fps_overlay_enabled";
+     private static final int REQUEST_LOAD_ARCHIVE = 200;
+     private static final int REQUEST_IMPORT_SAVES = 201;
+@@ -87,6 +88,7 @@ public class MainActivity extends SDLActivity
+     // In-screen gamepad
+     private final Gamepad mGamepad = new Gamepad();
+     private boolean mGamepadInvisible = false;
++    private boolean mBundledInstallInProgress = false;
+ 
+     // Slide-out launcher menu
+     private SideMenu mSideMenu;
+@@ -267,10 +269,8 @@ public class MainActivity extends SDLActivity
+                 // Run from the game directory
+                 runSDLThread();
+             } else {
+-                Log.v(TAG, "No game found in " + GAME_PATH + ", showing launcher menu");
+-
+-                // No game yet: let the user load one through the slide-out menu.
+-                mSideMenu.open();
++                Log.v(TAG, "No game found in " + GAME_PATH + ", installing bundled game");
++                installBundledGame();
+             }
+         } else {
+             // onStart: Resume SDL thread
+@@ -681,6 +681,76 @@ public class MainActivity extends SDLActivity
+         }).start();
+     }
+ 
++    /**
++     * Installs the game archive bundled inside this standalone APK on first
++     * launch. Later launches reuse the extracted files and go straight to the
++     * game, while the side menu remains available for saves and diagnostics.
++     */
++    private void installBundledGame()
++    {
++        if (mBundledInstallInProgress)
++            return;
++
++        mBundledInstallInProgress = true;
++
++        final ProgressDialog dialog = new ProgressDialog(this);
++        dialog.setMessage("Preparando Pokémon Nordeluna…");
++        dialog.setCancelable(false);
++        dialog.show();
++
++        new Thread(() -> {
++            boolean success = false;
++            String error = null;
++
++            try (InputStream in = getAssets().open(BUNDLED_GAME_ASSET)) {
++                File destRoot = new File(GAME_PATH_DEFAULT);
++                success = ArchiveExtractor.extract(in, destRoot, new ArchiveExtractor.ProgressListener()
++                {
++                    @Override
++                    public void onProgress(String entryName) { }
++
++                    @Override
++                    public void onError(String message)
++                    {
++                        Log.e(TAG, message);
++                    }
++                });
++            } catch (IOException e) {
++                error = e.getMessage();
++            }
++
++            final boolean ok = success;
++            final String err = error;
++
++            runOnUiThread(() -> {
++                dialog.dismiss();
++                mBundledInstallInProgress = false;
++
++                if (!ok) {
++                    Toast.makeText(MainActivity.this,
++                        "Não foi possível preparar o jogo" +
++                        (err != null ? ": " + err : ""), Toast.LENGTH_LONG).show();
++                    mSideMenu.open();
++                    return;
++                }
++
++                File gameFolder = findGameFolder(new File(GAME_PATH_DEFAULT));
++                if (gameFolder == null) {
++                    Toast.makeText(MainActivity.this,
++                        "O pacote não contém Game.ini", Toast.LENGTH_LONG).show();
++                    mSideMenu.open();
++                    return;
++                }
++
++                GAME_PATH = gameFolder.getAbsolutePath();
++                persistGamePath(GAME_PATH);
++                mSideMenu.setGamePath(GAME_PATH);
++                mSideMenu.close();
++                runSDLThread();
++            });
++        }, "Nordeluna installer").start();
++    }
++
+     /**
+      * Searches for the directory that actually contains a game, starting from
+      * {@code root} and descending into its subdirectories.
+diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
+index 9e37fed..c2df6da 100644
+--- a/android/app/src/main/res/values/strings.xml
++++ b/android/app/src/main/res/values/strings.xml
+@@ -1,11 +1,11 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+     <!-- Main application name -->
+-    <string name="app_name">mkxp-z</string>
++    <string name="app_name">Pokémon Nordeluna</string>
+ 
+     <!-- Slide-out launcher menu -->
+-    <string name="load_archive">Load game archive (.zip / .obb)</string>
+-    <string name="import_saves">Import save data</string>
+-    <string name="export_saves">Export save data</string>
+-    <string name="show_fps">Show FPS counter</string>
++    <string name="load_archive">Carregar outro pacote (.zip / .obb)</string>
++    <string name="import_saves">Importar save</string>
++    <string name="export_saves">Exportar save</string>
++    <string name="show_fps">Mostrar FPS</string>
+ </resources>
