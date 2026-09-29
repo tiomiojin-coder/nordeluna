@@ -92,11 +92,25 @@ def prepare_archive(input_path: Path, output_path: Path, config_path: Path) -> N
 
         with zipfile.ZipFile(temporary_path, "r") as check:
             check.testzip()
-            names = check.namelist()
+            entries = {
+                info.filename.removeprefix("./"): info for info in check.infolist()
+            }
+            names = list(entries)
             if any("\ufffd" in name for name in names):
                 raise ValueError("replacement character found after repackaging")
-            if "./Graphics/Pictures/Laboratório (Intro).png" not in names:
-                raise ValueError("intro laboratory background is missing")
+
+            required_assets = (
+                "Graphics/Pictures/Laboratório (Intro).png",
+                "Graphics/Tilesets/massapÊ.png",
+                "Graphics/Tilesets/SANTANA DO ACARAÚ.png",
+                "Graphics/Items/LANTERNA.png",
+            )
+            for name in required_assets:
+                if name not in entries:
+                    raise ValueError(f"required Android asset is missing: {name}")
+                if any(ord(character) > 127 for character in name):
+                    if not entries[name].flag_bits & 0x800:
+                        raise ValueError(f"asset path is not flagged as UTF-8: {name}")
 
         os.replace(temporary_path, output_path)
     finally:

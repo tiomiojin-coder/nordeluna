@@ -25,6 +25,8 @@
   "fontHeightReporting": 1,
   "fontOutlineCrop": false,
   "subImageFix": true,
+  "enableBlitting": false,
+  "maxTextureSize": 4096,
   "vsync": true,
   "syncToRefreshrate": true
 }

@@ -56,11 +56,18 @@ def main() -> None:
             ):
                 raise ValueError("unconverted MIDI file found in Android archive")
 
-            laboratory = "Graphics/Pictures/Laborat\u00f3rio (Intro).png"
-            if laboratory not in names:
-                raise ValueError("intro laboratory background is missing")
-            if not check.getinfo(laboratory).flag_bits & 0x800:
-                raise ValueError("intro laboratory path is not flagged as UTF-8")
+            required_assets = (
+                "Graphics/Pictures/Laborat\u00f3rio (Intro).png",
+                "Graphics/Tilesets/massap\u00ca.png",
+                "Graphics/Tilesets/SANTANA DO ACARA\u00da.png",
+                "Graphics/Items/LANTERNA.png",
+            )
+            for name in required_assets:
+                if name not in names:
+                    raise ValueError(f"required Android asset is missing: {name}")
+                if any(ord(character) > 127 for character in name):
+                    if not check.getinfo(name).flag_bits & 0x800:
+                        raise ValueError(f"asset path is not flagged as UTF-8: {name}")
             if "Audio/BGM/Lab.ogg" not in names:
                 raise ValueError("intro music was not converted to OGG")
 

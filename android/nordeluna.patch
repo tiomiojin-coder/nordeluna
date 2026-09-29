@@ -13,8 +13,8 @@ index 036a159..a500fde 100644
 -        versionCode 1
 -        versionName "0.1.0"
 -        archivesBaseName = "mkxp-z-$versionName"
-+        versionCode 4
-+        versionName "1.1.0"
++        versionCode 5
++        versionName "1.2.0"
 +        archivesBaseName = "Nordeluna-Android-$versionName"
          // Native ABIs are produced by build.sh (see ../build.sh) and placed
          // under src/main/jniLibs/. Everything present there is packaged.
@@ -125,7 +125,7 @@ index be544a2..d1a58fc 100644
              }
          } else {
              // onStart: Resume SDL thread
-@@ -681,6 +684,78 @@ public class MainActivity extends SDLActivity
+@@ -681,6 +684,116 @@ public class MainActivity extends SDLActivity
          }).start();
      }
  
@@ -152,6 +152,7 @@ index be544a2..d1a58fc 100644
 +
 +            try (InputStream in = getAssets().open(BUNDLED_GAME_ASSET)) {
 +                File destRoot = new File(GAME_PATH_DEFAULT);
++                clearBundledGameFiles(destRoot);
 +                success = ArchiveExtractor.extract(in, destRoot, new ArchiveExtractor.ProgressListener()
 +                {
 +                    @Override
@@ -199,6 +200,43 @@ index be544a2..d1a58fc 100644
 +                runSDLThread();
 +            });
 +        }, "Nordeluna installer").start();
++    }
++
++    /**
++     * Removes only files supplied by the bundled game before an update. Save
++     * data is stored under the configured app data path and is left intact.
++     */
++    private static void clearBundledGameFiles(File root)
++    {
++        String[] directories = {
++            "Audio", "Data", "Fonts", "Graphics", "Movies", "Plugins"
++        };
++        for (String directory : directories)
++            deleteRecursively(new File(root, directory));
++
++        String[] files = {
++            "Game.ini", "mkxp.json", "soundfont.sf2", "achievements.dat"
++        };
++        for (String filename : files)
++        {
++            File target = new File(root, filename);
++            if (target.exists() && !target.delete())
++                Log.w(TAG, "Could not remove old bundled file: " + target);
++        }
++    }
++
++    private static void deleteRecursively(File file)
++    {
++        if (!file.exists())
++            return;
++
++        File[] children = file.listFiles();
++        if (children != null)
++            for (File child : children)
++                deleteRecursively(child);
++
++        if (!file.delete())
++            Log.w(TAG, "Could not remove old bundled path: " + file);
 +    }
 +
      /**
