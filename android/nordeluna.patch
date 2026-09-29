@@ -1,5 +1,5 @@
 diff --git a/android/app/build.gradle b/android/app/build.gradle
-index 036a159..a500fde 100644
+index 036a159..c51df35 100644
 --- a/android/app/build.gradle
 +++ b/android/app/build.gradle
 @@ -7,12 +7,12 @@ android {
@@ -13,8 +13,8 @@ index 036a159..a500fde 100644
 -        versionCode 1
 -        versionName "0.1.0"
 -        archivesBaseName = "mkxp-z-$versionName"
-+        versionCode 5
-+        versionName "1.2.0"
++        versionCode 6
++        versionName "1.3.0"
 +        archivesBaseName = "Nordeluna-Android-$versionName"
          // Native ABIs are produced by build.sh (see ../build.sh) and placed
          // under src/main/jniLibs/. Everything present there is packaged.
@@ -47,10 +47,11 @@ index 036a159..a500fde 100644
 -}
 +// Native libraries are copied from the pinned upstream reference APK by CI.
 diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
-index a90712f..9389726 100644
+index a90712f..21d92e7 100644
 --- a/android/app/src/main/AndroidManifest.xml
 +++ b/android/app/src/main/AndroidManifest.xml
-@@ -34,6 +34,6 @@
+@@ -33,7 +33,7 @@
+ 
      <application
          android:label="@string/app_name"
 -        android:icon="@drawable/ic_launcher"
@@ -58,12 +59,13 @@ index a90712f..9389726 100644
          android:theme="@style/AppTheme"
          android:appCategory="game"
          android:isGame="true"
-@@ -45,7 +45,7 @@
+@@ -44,8 +44,8 @@
+     >
          <!-- Main activity -->
          <activity
 -            android:name=".MainActivity"
-+            android:name="com.mkxpz.MainActivity"
 -            android:label="mkxp-z"
++            android:name="com.mkxpz.MainActivity"
 +            android:label="Nordeluna"
              android:launchMode="singleTop"
              android:alwaysRetainTaskState="true"
@@ -85,7 +87,7 @@ index a90712f..9389726 100644
      </application>
  </manifest>
 diff --git a/android/app/src/main/java/com/mkxpz/MainActivity.java b/android/app/src/main/java/com/mkxpz/MainActivity.java
-index be544a2..d1a58fc 100644
+index be544a2..4acdf78 100644
 --- a/android/app/src/main/java/com/mkxpz/MainActivity.java
 +++ b/android/app/src/main/java/com/mkxpz/MainActivity.java
 @@ -65,6 +65,8 @@ public class MainActivity extends SDLActivity
@@ -97,7 +99,7 @@ index be544a2..d1a58fc 100644
      private static final String PREFS_FPS_OVERLAY = "fps_overlay_enabled";
      private static final int REQUEST_LOAD_ARCHIVE = 200;
      private static final int REQUEST_IMPORT_SAVES = 201;
-@@ -87,6 +89,7 @@ public class MainActivity extends SDLActivity
+@@ -87,11 +89,10 @@ public class MainActivity extends SDLActivity
      // In-screen gamepad
      private final Gamepad mGamepad = new Gamepad();
      private boolean mGamepadInvisible = false;
@@ -105,14 +107,31 @@ index be544a2..d1a58fc 100644
  
      // Slide-out launcher menu
      private SideMenu mSideMenu;
-@@ -264,14 +267,14 @@ public class MainActivity extends SDLActivity
+-    private boolean mEdgeTracking = false;
+-    private float mEdgeStartRawX = 0f;
+ 
+     private void runSDLThread()
+     {
+@@ -244,9 +245,6 @@ public class MainActivity extends SDLActivity
+         mSideMenu.setOnLoadArchiveListener(this::pickGameArchive);
+         mSideMenu.setOnImportSavesListener(this::pickImportSaves);
+         mSideMenu.setOnExportSavesListener(this::pickExportSaves);
+-
+-        // Briefly hint at the grab handle on first launch.
+-        mSideMenu.revealHandle();
+     }
+ 
+     @Override
+@@ -261,16 +259,16 @@ public class MainActivity extends SDLActivity
+ 
+                 // Try to mount main OBB file
                  mStorageManager.mountObb(OBB_MAIN_FILENAME, null, obbListener);
 -            } else if (hasGame(new File(GAME_PATH))) {
 +            } else if (hasGame(new File(GAME_PATH)) &&
 +                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(
 +                        PREFS_BUNDLED_VERSION, 0) == BuildConfig.VERSION_CODE) {
                  Log.v(TAG, "Game found in " + GAME_PATH + ", starting");
-
+ 
                  // Run from the game directory
                  runSDLThread();
              } else {
@@ -125,7 +144,17 @@ index be544a2..d1a58fc 100644
              }
          } else {
              // onStart: Resume SDL thread
-@@ -681,6 +684,116 @@ public class MainActivity extends SDLActivity
+@@ -315,9 +313,6 @@ public class MainActivity extends SDLActivity
+     @Override
+     public boolean dispatchTouchEvent(MotionEvent evt)
+     {
+-        // Slide-out menu: a swipe right from the left screen edge opens it.
+-        handleEdgeSwipe(evt);
+-
+         // Show gamepad view on touch when hidden (but not while the menu is open).
+         if ((mSideMenu == null || !mSideMenu.isOpen()) && mGamepadInvisible) {
+             mGamepad.showView();
+@@ -681,6 +676,116 @@ public class MainActivity extends SDLActivity
          }).start();
      }
  
@@ -242,11 +271,341 @@ index be544a2..d1a58fc 100644
      /**
       * Searches for the directory that actually contains a game, starting from
       * {@code root} and descending into its subdirectories.
+@@ -810,33 +915,4 @@ public class MainActivity extends SDLActivity
+         System.exit(0);
+     }
+ 
+-    private void handleEdgeSwipe(MotionEvent evt)
+-    {
+-        if (mSideMenu == null)
+-            return;
+-
+-        int action = evt.getActionMasked();
+-        float density = getResources().getDisplayMetrics().density;
+-        float edgeWidth = 40f * density;
+-        float slop = 24f * density;
+-
+-        if (action == MotionEvent.ACTION_DOWN) {
+-            if (!mSideMenu.isOpen() && evt.getX() < edgeWidth) {
+-                mEdgeTracking = true;
+-                mEdgeStartRawX = evt.getRawX();
+-                mSideMenu.revealHandle();
+-            } else {
+-                mEdgeTracking = false;
+-            }
+-        } else if (mEdgeTracking) {
+-            if (action == MotionEvent.ACTION_MOVE) {
+-                if (evt.getRawX() - mEdgeStartRawX > slop) {
+-                    mEdgeTracking = false;
+-                    mSideMenu.open();
+-                }
+-            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+-                mEdgeTracking = false;
+-            }
+-        }
+-    }
+ }
+diff --git a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
+index 155e305..732e883 100644
+--- a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
++++ b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
+@@ -4,14 +4,14 @@ import android.content.Context;
+ import android.graphics.Color;
+ import android.graphics.Typeface;
+ import android.graphics.drawable.GradientDrawable;
+-import android.view.MotionEvent;
++import android.view.Gravity;
+ import android.view.View;
+-import android.view.ViewConfiguration;
+ import android.view.ViewGroup;
+ import android.view.animation.DecelerateInterpolator;
+ import android.widget.Button;
+ import android.widget.LinearLayout;
+ import android.widget.RelativeLayout;
++import android.widget.ScrollView;
+ import android.widget.Switch;
+ import android.widget.TextView;
+ 
+@@ -22,9 +22,9 @@ import com.mkxpz.R;
+  *
+  * <p>The menu is kept as a set of sibling views added to the activity's
+  * content {@link RelativeLayout}, so it does not require restructuring the
+- * SDL bootstrap. When closed it only occupies a thin grab handle at the left
+- * screen edge; the panel itself is translated off-screen and the scrim is
+- * removed, letting touches pass through to the game below.</p>
++ * SDL bootstrap. When closed it only occupies a compact settings button in
++ * the upper-left corner; the panel itself is translated off-screen and the
++ * scrim is removed, letting touches pass through to the game below.</p>
+  */
+ public class SideMenu
+ {
+@@ -53,13 +53,11 @@ public class SideMenu
+ 
+     private View mScrim;
+     private LinearLayout mPanel;
+-    private View mHandle;
++    private TextView mConfigButton;
+     private TextView mGamePathView;
+     private Switch mFpsToggle;
+ 
+     private final int mPanelWidth;
+-    private final int mHandleWidth;
+-    private final int mTouchSlop;
+ 
+     private OnLoadArchiveListener mOnLoadArchiveListener = () -> {};
+ 
+@@ -68,23 +66,16 @@ public class SideMenu
+     private OnFpsOverlayToggleListener mOnFpsOverlayToggleListener = enabled -> {};
+ 
+     private boolean mOpen = false;
+-    private boolean mDidDrag = false;
+-    private float mDragStartRawX = 0f;
+-    private float mDragStartOffset = 0f;
+     private float mOffset = 0f; // 0 == open, -panelWidth == closed
+ 
+-    private static final int HANDLE_REVEAL_DURATION_MS = 1500;
+-    private final Runnable mHideHandleRunnable = this::hideHandle;
+-
+     public SideMenu(Context context, ViewGroup root)
+     {
+         mContext = context;
+         mRoot = root;
+ 
+         float density = context.getResources().getDisplayMetrics().density;
+-        mPanelWidth = (int) (300f * density);
+-        mHandleWidth = (int) (14f * density);
+-        mTouchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
++        int screenWidth = context.getResources().getDisplayMetrics().widthPixels;
++        mPanelWidth = Math.min((int) (320f * density), (int) (screenWidth * 0.82f));
+ 
+         build();
+         setOffset(-mPanelWidth);
+@@ -142,25 +133,40 @@ public class SideMenu
+         mPanel = new LinearLayout(mContext);
+         mPanel.setOrientation(LinearLayout.VERTICAL);
+         mPanel.setBackgroundColor(Color.rgb(22, 22, 22));
+-        mPanel.setPadding(dp(20), dp(24), dp(20), dp(24));
++        mPanel.setClickable(true);
+ 
+         RelativeLayout.LayoutParams panelLp = new RelativeLayout.LayoutParams(
+             mPanelWidth, ViewGroup.LayoutParams.MATCH_PARENT);
+         panelLp.addRule(RelativeLayout.ALIGN_PARENT_START);
+         mRoot.addView(mPanel, panelLp);
+ 
++        // The contents scroll vertically so every setting remains reachable
++        // on short landscape displays and on devices with large system bars.
++        ScrollView scrollView = new ScrollView(mContext);
++        scrollView.setFillViewport(true);
++        scrollView.setVerticalScrollBarEnabled(true);
++        scrollView.setScrollbarFadingEnabled(false);
++        mPanel.addView(scrollView, new LinearLayout.LayoutParams(
++            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
++
++        LinearLayout content = new LinearLayout(mContext);
++        content.setOrientation(LinearLayout.VERTICAL);
++        content.setPadding(dp(20), dp(20), dp(20), dp(36));
++        scrollView.addView(content, new ScrollView.LayoutParams(
++            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
++
+         TextView title = new TextView(mContext);
+-        title.setText(R.string.app_name);
++        title.setText(R.string.settings_title);
+         title.setTextColor(Color.WHITE);
+         title.setTextSize(22f);
+         title.setTypeface(null, Typeface.BOLD);
+-        mPanel.addView(title);
++        content.addView(title);
+ 
+         mGamePathView = new TextView(mContext);
+         mGamePathView.setTextColor(0xB0FFFFFF);
+         mGamePathView.setTextSize(12f);
+         mGamePathView.setPadding(0, dp(12), 0, 0);
+-        mPanel.addView(mGamePathView);
++        content.addView(mGamePathView);
+ 
+         Button loadArchive = new Button(mContext);
+         loadArchive.setText(R.string.load_archive);
+@@ -173,7 +179,7 @@ public class SideMenu
+             close();
+             mOnLoadArchiveListener.onLoadArchive();
+         });
+-        mPanel.addView(loadArchive);
++        content.addView(loadArchive);
+ 
+         Button importSaves = new Button(mContext);
+         importSaves.setText(R.string.import_saves);
+@@ -186,7 +192,7 @@ public class SideMenu
+             close();
+             mOnImportSavesListener.onImportSaves();
+         });
+-        mPanel.addView(importSaves);
++        content.addView(importSaves);
+ 
+         Button exportSaves = new Button(mContext);
+         exportSaves.setText(R.string.export_saves);
+@@ -199,7 +205,7 @@ public class SideMenu
+             close();
+             mOnExportSavesListener.onExportSaves();
+         });
+-        mPanel.addView(exportSaves);
++        content.addView(exportSaves);
+ 
+         mFpsToggle = new Switch(mContext);
+         mFpsToggle.setText(R.string.show_fps);
+@@ -210,103 +216,39 @@ public class SideMenu
+         mFpsToggle.setLayoutParams(fpsLp);
+         mFpsToggle.setOnCheckedChangeListener((buttonView, isChecked) ->
+             mOnFpsOverlayToggleListener.onFpsOverlayToggle(isChecked));
+-        mPanel.addView(mFpsToggle);
+-
+-        // Grab handle: a thin strip at the left edge. Kept mostly transparent
+-        // and only revealed transiently so it doesn't intrude on the game.
+-        mHandle = new View(mContext);
+-        mHandle.setBackground(makeHandleDrawable());
+-        mHandle.setClickable(true);
+-        RelativeLayout.LayoutParams handleLp = new RelativeLayout.LayoutParams(
+-            mHandleWidth, dp(96));
+-        handleLp.addRule(RelativeLayout.ALIGN_PARENT_START);
+-        handleLp.addRule(RelativeLayout.CENTER_VERTICAL);
+-        mRoot.addView(mHandle, handleLp);
+-        mHandle.setOnTouchListener(this::onHandleTouch);
+-        mHandle.setVisibility(View.INVISIBLE);
+-        mHandle.setAlpha(0f);
++        content.addView(mFpsToggle);
++
++        // Explicit settings button. Keeping it in the upper-left avoids the
++        // directional pad and removes the edge-swipe conflict with gameplay.
++        mConfigButton = new TextView(mContext);
++        mConfigButton.setText("\u2699");
++        mConfigButton.setContentDescription(mContext.getString(R.string.open_settings));
++        mConfigButton.setTextColor(Color.WHITE);
++        mConfigButton.setTextSize(24f);
++        mConfigButton.setGravity(Gravity.CENTER);
++        mConfigButton.setTypeface(null, Typeface.BOLD);
++        mConfigButton.setBackground(makeConfigButtonDrawable());
++        mConfigButton.setClickable(true);
++        mConfigButton.setFocusable(true);
++        mConfigButton.setElevation(dp(6));
++        mConfigButton.setOnClickListener(v -> open());
++
++        RelativeLayout.LayoutParams configLp = new RelativeLayout.LayoutParams(dp(44), dp(44));
++        configLp.addRule(RelativeLayout.ALIGN_PARENT_START);
++        configLp.addRule(RelativeLayout.ALIGN_PARENT_TOP);
++        configLp.setMargins(dp(8), dp(8), 0, 0);
++        mRoot.addView(mConfigButton, configLp);
+     }
+ 
+-    private GradientDrawable makeHandleDrawable()
++    private GradientDrawable makeConfigButtonDrawable()
+     {
+         GradientDrawable d = new GradientDrawable();
+-        d.setColor(0x33202020);
+-        d.setCornerRadius(dp(7));
++        d.setColor(0xCC202020);
++        d.setStroke(dp(1), 0x88FFFFFF);
++        d.setCornerRadius(dp(22));
+         return d;
+     }
+ 
+-    /**
+-     * Briefly reveals the grab handle (a hint at the left edge), then fades it
+-     * out again after {@link #HANDLE_REVEAL_DURATION_MS}.
+-     */
+-    public void revealHandle()
+-    {
+-        if (mHandle == null)
+-            return;
+-
+-        mHandle.removeCallbacks(mHideHandleRunnable);
+-        mHandle.animate().cancel();
+-        mHandle.setVisibility(View.VISIBLE);
+-        mHandle.setAlpha(1f);
+-        mHandle.postDelayed(mHideHandleRunnable, HANDLE_REVEAL_DURATION_MS);
+-    }
+-
+-    private void hideHandle()
+-    {
+-        if (mHandle == null)
+-            return;
+-
+-        mHandle.animate()
+-            .alpha(0f)
+-            .setDuration(300)
+-            .withEndAction(() -> mHandle.setVisibility(View.INVISIBLE))
+-            .start();
+-    }
+-
+-    private boolean onHandleTouch(View v, MotionEvent ev)
+-    {
+-        switch (ev.getActionMasked())
+-        {
+-            case MotionEvent.ACTION_DOWN:
+-                mDidDrag = false;
+-                mPanel.animate().cancel();
+-                mDragStartRawX = ev.getRawX();
+-                mDragStartOffset = mOffset;
+-                mPanel.setVisibility(View.VISIBLE);
+-                mScrim.setVisibility(View.VISIBLE);
+-                return true;
+-
+-            case MotionEvent.ACTION_MOVE:
+-            {
+-                float dx = ev.getRawX() - mDragStartRawX;
+-                if (!mDidDrag && Math.abs(dx) > mTouchSlop)
+-                    mDidDrag = true;
+-
+-                if (mDidDrag)
+-                    setOffset(clamp(mDragStartOffset + dx, -mPanelWidth, 0f));
+-                return true;
+-            }
+-
+-            case MotionEvent.ACTION_UP:
+-            case MotionEvent.ACTION_CANCEL:
+-                if (!mDidDrag) {
+-                    // A plain tap toggles the menu.
+-                    toggle();
+-                } else if (mOffset > -mPanelWidth / 2f) {
+-                    open();
+-                } else {
+-                    close();
+-                }
+-                return true;
+-        }
+-        return false;
+-    }
+-
+-    private float clamp(float value, float min, float max)
+-    {
+-        return Math.max(min, Math.min(max, value));
+-    }
+-
+     private void setOffset(float offset)
+     {
+         mOffset = offset;
+@@ -323,7 +265,7 @@ public class SideMenu
+     public void open()
+     {
+         mOpen = true;
+-        hideHandle();
++        mConfigButton.setVisibility(View.INVISIBLE);
+         mPanel.setVisibility(View.VISIBLE);
+         mScrim.setVisibility(View.VISIBLE);
+         animateTo(0f);
+@@ -333,8 +275,7 @@ public class SideMenu
+     {
+         mOpen = false;
+         animateTo(-mPanelWidth);
+-        // Briefly re-afford the handle after the menu slides away.
+-        revealHandle();
++        mConfigButton.setVisibility(View.VISIBLE);
+     }
+ 
+     public void toggle()
 diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
-index 9e37fed..c2df6da 100644
+index 9e37fed..8789abd 100644
 --- a/android/app/src/main/res/values/strings.xml
 +++ b/android/app/src/main/res/values/strings.xml
-@@ -1,11 +1,11 @@
+@@ -1,11 +1,13 @@
  <?xml version="1.0" encoding="utf-8"?>
  <resources>
      <!-- Main application name -->
@@ -262,4 +621,6 @@ index 9e37fed..c2df6da 100644
 +    <string name="import_saves">Importar save</string>
 +    <string name="export_saves">Exportar save</string>
 +    <string name="show_fps">Mostrar FPS</string>
++    <string name="settings_title">Configurações</string>
++    <string name="open_settings">Abrir configurações</string>
  </resources>
