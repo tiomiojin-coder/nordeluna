@@ -106,17 +106,17 @@ jobs:
           test -n "$APK"
           unzip -l "$APK" | grep -F 'assets/nordeluna-game.zip'
           unzip -l "$APK" | grep -F 'lib/arm64-v8a/libmkxp-z.so'
-          cp "$APK" build-android/Nordeluna-Android-arm64-v1.5.apk
-          sha256sum build-android/Nordeluna-Android-arm64-v1.5.apk > build-android/Nordeluna-Android-arm64-v1.5.apk.sha256
-          ls -lh build-android/Nordeluna-Android-arm64-v1.5.apk
+          cp "$APK" build-android/Nordeluna-Android-arm64-v1.6.apk
+          sha256sum build-android/Nordeluna-Android-arm64-v1.6.apk > build-android/Nordeluna-Android-arm64-v1.6.apk.sha256
+          ls -lh build-android/Nordeluna-Android-arm64-v1.6.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Nordeluna-Android-arm64-v1.5
+          name: Nordeluna-Android-arm64-v1.6
           path: |
-            build-android/Nordeluna-Android-arm64-v1.5.apk
-            build-android/Nordeluna-Android-arm64-v1.5.apk.sha256
+            build-android/Nordeluna-Android-arm64-v1.6.apk
+            build-android/Nordeluna-Android-arm64-v1.6.apk.sha256
           compression-level: 0
           retention-days: 14
 

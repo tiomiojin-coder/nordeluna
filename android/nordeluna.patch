@@ -1,5 +1,5 @@
 diff --git a/android/app/build.gradle b/android/app/build.gradle
-index 036a159..7a5464a 100644
+index 036a159..2b36168 100644
 --- a/android/app/build.gradle
 +++ b/android/app/build.gradle
 @@ -7,12 +7,12 @@ android {
@@ -13,8 +13,8 @@ index 036a159..7a5464a 100644
 -        versionCode 1
 -        versionName "0.1.0"
 -        archivesBaseName = "mkxp-z-$versionName"
-+        versionCode 8
-+        versionName "1.5.0"
++        versionCode 9
++        versionName "1.6.0"
 +        archivesBaseName = "Nordeluna-Android-$versionName"
          // Native ABIs are produced by build.sh (see ../build.sh) and placed
          // under src/main/jniLibs/. Everything present there is packaged.
@@ -87,7 +87,7 @@ index a90712f..21d92e7 100644
      </application>
  </manifest>
 diff --git a/android/app/src/main/java/com/mkxpz/MainActivity.java b/android/app/src/main/java/com/mkxpz/MainActivity.java
-index be544a2..93e1798 100644
+index be544a2..c21ee77 100644
 --- a/android/app/src/main/java/com/mkxpz/MainActivity.java
 +++ b/android/app/src/main/java/com/mkxpz/MainActivity.java
 @@ -3,6 +3,7 @@ package com.mkxpz;
@@ -98,9 +98,11 @@ index be544a2..93e1798 100644
  import android.app.PendingIntent;
  import android.app.ProgressDialog;
  import android.content.Context;
-@@ -11,11 +12,13 @@ import android.content.SharedPreferences;
+@@ -10,14 +11,18 @@ import android.content.Intent;
+ import android.content.SharedPreferences;
  import android.content.pm.ActivityInfo;
  import android.content.pm.PackageManager;
++import android.graphics.Canvas;
  import android.view.View;
 +import android.view.Gravity;
  import android.view.KeyEvent;
@@ -112,8 +114,20 @@ index be544a2..93e1798 100644
 +import android.widget.RelativeLayout;
  import android.widget.Toast;
  import android.graphics.Color;
++import android.graphics.Paint;
  import android.graphics.Typeface;
-@@ -35,6 +38,7 @@ import java.util.ArrayList;
+ import android.graphics.drawable.GradientDrawable;
+ import android.os.Build;
+@@ -27,6 +32,8 @@ import android.os.Vibrator;
+ import android.os.VibrationEffect;
+ import android.os.storage.StorageManager;
+ import android.os.storage.OnObbStateChangeListener;
++import android.hardware.input.InputManager;
++import android.media.AudioManager;
+ import android.net.Uri;
+ import android.util.Log;
+ import android.util.TypedValue;
+@@ -35,6 +42,7 @@ import java.util.ArrayList;
  import java.util.List;
  import java.io.File;
  import java.io.FileInputStream;
@@ -121,15 +135,16 @@ index be544a2..93e1798 100644
  import java.io.IOException;
  import java.io.InputStream;
  import java.nio.charset.StandardCharsets;
-@@ -42,6 +46,7 @@ import java.util.regex.Matcher;
+@@ -42,6 +50,8 @@ import java.util.regex.Matcher;
  import java.util.regex.Pattern;
  
  import org.libsdl.app.SDLActivity;
 +import org.libsdl.app.SDLAudioManager;
++import org.libsdl.app.SDLControllerManager;
  import com.mkxpz.gamepad.Gamepad;
  import com.mkxpz.gamepad.GamepadConfig;
  import com.mkxpz.launcher.SideMenu;
-@@ -65,7 +70,13 @@ public class MainActivity extends SDLActivity
+@@ -65,7 +75,15 @@ public class MainActivity extends SDLActivity
  
      private static final String PREFS_NAME = "mkxpz_prefs";
      private static final String PREFS_GAME_PATH = "game_path";
@@ -140,16 +155,52 @@ index be544a2..93e1798 100644
 +    private static final String PREFS_AUDIO_MUTED = "audio_muted";
 +    private static final String PREFS_TOUCH_CONTROLS = "touch_controls_enabled";
 +    private static final String PREFS_GAME_AREA_SCALE = "game_area_scale";
++    private static final String PREFS_GRAPHICS_FILTER = "graphics_filter";
++    private static final String PREFS_WHATS_NEW_VERSION = "whats_new_version";
      private static final int REQUEST_LOAD_ARCHIVE = 200;
      private static final int REQUEST_IMPORT_SAVES = 201;
      private static final int REQUEST_EXPORT_SAVES = 202;
-@@ -87,15 +98,19 @@ public class MainActivity extends SDLActivity
+@@ -87,19 +105,62 @@ public class MainActivity extends SDLActivity
      // In-screen gamepad
      private final Gamepad mGamepad = new Gamepad();
      private boolean mGamepadInvisible = false;
 +    private boolean mTouchControlsEnabled = true;
 +    private boolean mBundledInstallInProgress = false;
 +    private FrameLayout mGameSurfaceContainer;
++    private CrtOverlayView mCrtOverlay;
++    private AudioManager mAudioManager;
++    private InputManager mInputManager;
++    private boolean mActivityResumed = false;
++    private boolean mPausedForAudioFocus = false;
++    private boolean mWhatsNewScheduled = false;
++
++    private final AudioManager.OnAudioFocusChangeListener mAudioFocusListener = focusChange -> {
++        if (mMainHandler == null)
++            return;
++        mMainHandler.post(() -> handleAudioFocusChange(focusChange));
++    };
++
++    private final InputManager.InputDeviceListener mInputDeviceListener =
++        new InputManager.InputDeviceListener()
++        {
++            @Override
++            public void onInputDeviceAdded(int deviceId)
++            {
++                scheduleControllerRescan();
++            }
++
++            @Override
++            public void onInputDeviceRemoved(int deviceId)
++            {
++                scheduleControllerRescan();
++            }
++
++            @Override
++            public void onInputDeviceChanged(int deviceId)
++            {
++                scheduleControllerRescan();
++            }
++        };
  
      // Slide-out launcher menu
      private SideMenu mSideMenu;
@@ -162,10 +213,19 @@ index be544a2..93e1798 100644
 +            int displayMode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(
 +                PREFS_DISPLAY_MODE, SideMenu.DISPLAY_KEEP_ASPECT);
 +            applyDisplayModeToGameConfig(displayMode);
++            int graphicsFilter = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(
++                PREFS_GRAPHICS_FILTER, SideMenu.FILTER_PIXEL);
++            applyGraphicsFilterToGameConfig(graphicsFilter);
              Log.i(TAG, "Game path: " + GAME_PATH);
          }
  
-@@ -176,6 +191,16 @@ public class MainActivity extends SDLActivity
+         mStarted = true;
++        scheduleControllerRescan();
++        scheduleWhatsNew();
+ 
+         // Run (resume) native SDL thread
+         if (mHasMultiWindow) {
+@@ -176,8 +237,25 @@ public class MainActivity extends SDLActivity
          GAME_PATH_DEFAULT = new File(gameRootBase, "mkxp-z").getAbsolutePath();
          GAME_PATH = GAME_PATH_DEFAULT;
  
@@ -175,14 +235,23 @@ index be544a2..93e1798 100644
 +        int displayMode = prefs.getInt(PREFS_DISPLAY_MODE, SideMenu.DISPLAY_KEEP_ASPECT);
 +        int gameAreaScale = prefs.getInt(
 +            PREFS_GAME_AREA_SCALE, SideMenu.DEFAULT_GAME_AREA_SCALE);
++        int graphicsFilter = prefs.getInt(PREFS_GRAPHICS_FILTER, SideMenu.FILTER_PIXEL);
 +        SDLAudioManager.setMuted(audioMuted);
 +        setupGameSurfaceContainer();
 +        applySurfaceLayoutMode(displayMode, gameAreaScale);
++        applyCrtOverlay(graphicsFilter);
 +
          mMainHandler = new Handler(getMainLooper());
  
++        mAudioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
++        mInputManager = (InputManager) getSystemService(Context.INPUT_SERVICE);
++        if (mInputManager != null)
++            mInputManager.registerInputDeviceListener(mInputDeviceListener, mMainHandler);
++
          mStorageManager = (StorageManager) getSystemService(STORAGE_SERVICE);
-@@ -196,7 +221,7 @@ public class MainActivity extends SDLActivity
+         mVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+ 
+@@ -196,7 +274,7 @@ public class MainActivity extends SDLActivity
          }
  
          // Setup in-screen gamepad
@@ -191,7 +260,7 @@ index be544a2..93e1798 100644
          GamepadConfig gpadConfig = new GamepadConfig();
          mGamepad.init(gpadConfig, mGamepadInvisible);
          mGamepad.setOnKeyDownListener(SDLActivity::onNativeKeyDown);
-@@ -206,7 +231,7 @@ public class MainActivity extends SDLActivity
+@@ -206,7 +284,7 @@ public class MainActivity extends SDLActivity
              mGamepad.attachTo(this, mLayout);
          }
  
@@ -200,7 +269,7 @@ index be544a2..93e1798 100644
          tvFps = new TextView(this);
          tvFps.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
          tvFps.setTextColor(Color.WHITE);
-@@ -220,14 +245,16 @@ public class MainActivity extends SDLActivity
+@@ -220,14 +298,16 @@ public class MainActivity extends SDLActivity
          tvFps.setPadding(dpPx(10), dpPx(4), dpPx(10), dpPx(4));
          tvFps.setVisibility(View.GONE);
  
@@ -220,17 +289,19 @@ index be544a2..93e1798 100644
          String savedGamePath = prefs.getString(PREFS_GAME_PATH, null);
          if (savedGamePath != null && new File(savedGamePath).isDirectory()) {
              GAME_PATH = savedGamePath;
-@@ -240,13 +267,18 @@ public class MainActivity extends SDLActivity
+@@ -240,13 +320,20 @@ public class MainActivity extends SDLActivity
          mSideMenu = new SideMenu(this, mLayout);
          mSideMenu.setGamePath(GAME_PATH);
          mSideMenu.setFpsOverlayEnabled(fpsOverlayEnabled);
 +        mSideMenu.setDisplayMode(displayMode);
 +        mSideMenu.setGameAreaScale(gameAreaScale);
++        mSideMenu.setGraphicsFilter(graphicsFilter);
 +        mSideMenu.setMuted(audioMuted);
 +        mSideMenu.setTouchControlsEnabled(mTouchControlsEnabled);
          mSideMenu.setOnFpsOverlayToggleListener(this::setFpsOverlayEnabled);
 +        mSideMenu.setOnDisplayModeChangeListener(this::setDisplayMode);
 +        mSideMenu.setOnGameAreaScaleChangeListener(this::setGameAreaScale);
++        mSideMenu.setOnGraphicsFilterChangeListener(this::setGraphicsFilter);
 +        mSideMenu.setOnMuteToggleListener(this::setAudioMuted);
 +        mSideMenu.setOnTouchControlsToggleListener(this::setTouchControlsEnabled);
          mSideMenu.setOnLoadArchiveListener(this::pickGameArchive);
@@ -242,7 +313,7 @@ index be544a2..93e1798 100644
      }
  
      @Override
-@@ -261,16 +293,16 @@ public class MainActivity extends SDLActivity
+@@ -261,16 +348,16 @@ public class MainActivity extends SDLActivity
  
                  // Try to mount main OBB file
                  mStorageManager.mountObb(OBB_MAIN_FILENAME, null, obbListener);
@@ -264,7 +335,125 @@ index be544a2..93e1798 100644
              }
          } else {
              // onStart: Resume SDL thread
-@@ -315,11 +347,9 @@ public class MainActivity extends SDLActivity
+@@ -278,9 +365,33 @@ public class MainActivity extends SDLActivity
+         }
+     }
+ 
++    @Override
++    protected void onResume()
++    {
++        super.onResume();
++        mActivityResumed = true;
++        requestGameAudioFocus();
++        mPausedForAudioFocus = false;
++        SDLAudioManager.setPlaybackPaused(false);
++        scheduleControllerRescan();
++        scheduleWhatsNew();
++    }
++
++    @Override
++    protected void onPause()
++    {
++        mActivityResumed = false;
++        SDLAudioManager.setPlaybackPaused(true);
++        abandonGameAudioFocus();
++        super.onPause();
++    }
++
+     @Override
+     protected void onDestroy()
+     {
++        if (mInputManager != null)
++            mInputManager.unregisterInputDeviceListener(mInputDeviceListener);
++        abandonGameAudioFocus();
+         super.onDestroy();
+ 
+         // HACK: Exiting the JVM (process) since Ruby does not like when we
+@@ -289,6 +400,83 @@ public class MainActivity extends SDLActivity
+         System.exit(0);
+     }
+ 
++    @SuppressWarnings("deprecation")
++    private void requestGameAudioFocus()
++    {
++        if (mAudioManager != null) {
++            mAudioManager.requestAudioFocus(mAudioFocusListener,
++                AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
++        }
++    }
++
++    @SuppressWarnings("deprecation")
++    private void abandonGameAudioFocus()
++    {
++        if (mAudioManager != null)
++            mAudioManager.abandonAudioFocus(mAudioFocusListener);
++    }
++
++    private void handleAudioFocusChange(int focusChange)
++    {
++        if (focusChange == AudioManager.AUDIOFOCUS_LOSS ||
++                focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
++            SDLAudioManager.setPlaybackPaused(true);
++            if (mStarted && !mPausedForAudioFocus) {
++                mPausedForAudioFocus = true;
++                pauseNativeThread();
++            }
++        } else if (focusChange == AudioManager.AUDIOFOCUS_GAIN) {
++            SDLAudioManager.setPlaybackPaused(false);
++            if (mStarted && mActivityResumed && mPausedForAudioFocus) {
++                mPausedForAudioFocus = false;
++                resumeNativeThread();
++            }
++        }
++    }
++
++    private void scheduleControllerRescan()
++    {
++        if (mMainHandler == null || !mStarted)
++            return;
++        mMainHandler.removeCallbacks(mControllerRescanRunnable);
++        mMainHandler.postDelayed(mControllerRescanRunnable, 350);
++    }
++
++    private final Runnable mControllerRescanRunnable = () -> {
++        try {
++            SDLControllerManager.pollInputDevices();
++            SDLControllerManager.pollHapticDevices();
++            Log.i(TAG, "Bluetooth/USB controller list refreshed");
++        } catch (Exception e) {
++            Log.w(TAG, "Controller rescan failed", e);
++        }
++    };
++
++    private void scheduleWhatsNew()
++    {
++        if (mMainHandler == null || !mStarted || mWhatsNewScheduled)
++            return;
++        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
++        if (prefs.getInt(PREFS_WHATS_NEW_VERSION, 0) >= BuildConfig.VERSION_CODE)
++            return;
++        mWhatsNewScheduled = true;
++        mMainHandler.postDelayed(() -> {
++            if (!mActivityResumed) {
++                mWhatsNewScheduled = false;
++                return;
++            }
++            new AlertDialog.Builder(this)
++                .setTitle(getString(R.string.whats_new_title, BuildConfig.VERSION_NAME))
++                .setMessage(R.string.whats_new_message)
++                .setCancelable(false)
++                .setPositiveButton(R.string.got_it, (dialog, which) ->
++                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
++                        .putInt(PREFS_WHATS_NEW_VERSION, BuildConfig.VERSION_CODE)
++                        .apply())
++                .show();
++        }, 900);
++    }
++
+     @Override
+     public boolean dispatchKeyEvent(KeyEvent evt)
+     {
+@@ -315,11 +503,9 @@ public class MainActivity extends SDLActivity
      @Override
      public boolean dispatchTouchEvent(MotionEvent evt)
      {
@@ -278,7 +467,7 @@ index be544a2..93e1798 100644
              mGamepad.showView();
              mGamepadInvisible = false;
          }
-@@ -392,6 +422,178 @@ public class MainActivity extends SDLActivity
+@@ -392,6 +578,318 @@ public class MainActivity extends SDLActivity
              tvFps.setVisibility(View.GONE);
      }
  
@@ -354,6 +543,81 @@ index be544a2..93e1798 100644
 +        }
 +    }
 +
++    private void setGraphicsFilter(int filter)
++    {
++        if (filter < SideMenu.FILTER_PIXEL || filter > SideMenu.FILTER_CRT)
++            filter = SideMenu.FILTER_PIXEL;
++
++        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
++        int currentFilter = prefs.getInt(PREFS_GRAPHICS_FILTER, SideMenu.FILTER_PIXEL);
++        if (currentFilter == filter)
++            return;
++
++        final int requestedFilter = filter;
++        if (mStarted) {
++            new AlertDialog.Builder(this)
++                .setTitle(R.string.filter_restart_title)
++                .setMessage(R.string.filter_restart_message)
++                .setPositiveButton(R.string.apply_and_restart, (dialog, which) ->
++                    applyGraphicsFilterSelection(requestedFilter, true))
++                .setNegativeButton(android.R.string.cancel, (dialog, which) ->
++                    mSideMenu.setGraphicsFilter(currentFilter))
++                .setOnCancelListener(dialog -> mSideMenu.setGraphicsFilter(currentFilter))
++                .show();
++        } else {
++            applyGraphicsFilterSelection(requestedFilter, false);
++        }
++    }
++
++    private void applyGraphicsFilterSelection(int filter, boolean restart)
++    {
++        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
++        int previousFilter = prefs.getInt(PREFS_GRAPHICS_FILTER, SideMenu.FILTER_PIXEL);
++        if (!applyGraphicsFilterToGameConfig(filter)) {
++            mSideMenu.setGraphicsFilter(previousFilter);
++            Toast.makeText(this, R.string.filter_apply_failed, Toast.LENGTH_LONG).show();
++            return;
++        }
++
++        prefs.edit().putInt(PREFS_GRAPHICS_FILTER, filter).apply();
++        applyCrtOverlay(filter);
++        if (restart) {
++            mSideMenu.close();
++            Toast.makeText(this, R.string.filter_restarting, Toast.LENGTH_SHORT).show();
++            mMainHandler.postDelayed(this::restartApp, 450);
++        }
++    }
++
++    private boolean applyGraphicsFilterToGameConfig(int filter)
++    {
++        File configFile = new File(GAME_PATH, "mkxp.json");
++        if (!configFile.isFile())
++            return false;
++
++        StringBuilder sb = new StringBuilder();
++        try (FileInputStream in = new FileInputStream(configFile)) {
++            byte[] buffer = new byte[4096];
++            int count;
++            while ((count = in.read(buffer)) > 0)
++                sb.append(new String(buffer, 0, count, StandardCharsets.UTF_8));
++        } catch (IOException e) {
++            Log.e(TAG, "Could not read graphics filter configuration", e);
++            return false;
++        }
++
++        int smoothScaling = filter == SideMenu.FILTER_BILINEAR ? 1 : 0;
++        String json = setJsonInteger(sb.toString(), "smoothScaling", smoothScaling);
++        json = setJsonInteger(json, "smoothScalingDown", smoothScaling);
++
++        try (FileOutputStream out = new FileOutputStream(configFile, false)) {
++            out.write(json.getBytes(StandardCharsets.UTF_8));
++            return true;
++        } catch (IOException e) {
++            Log.e(TAG, "Could not write graphics filter configuration", e);
++            return false;
++        }
++    }
++
 +    private boolean applyDisplayModeToGameConfig(int mode)
 +    {
 +        File configFile = new File(GAME_PATH, "mkxp.json");
@@ -406,6 +670,26 @@ index be544a2..93e1798 100644
 +            "\": " + value + "\n" + json.substring(closingBrace);
 +    }
 +
++    private static String setJsonInteger(String json, String key, int value)
++    {
++        Pattern pattern = Pattern.compile("(?m)^(\\s*\\\"" + Pattern.quote(key) +
++            "\\\"\\s*:\\s*)(-?\\d+)");
++        Matcher matcher = pattern.matcher(json);
++        if (matcher.find())
++            return matcher.replaceFirst(Matcher.quoteReplacement(
++                matcher.group(1) + Integer.toString(value)));
++
++        int closingBrace = json.lastIndexOf('}');
++        if (closingBrace < 0)
++            return json;
++        int previous = closingBrace - 1;
++        while (previous >= 0 && Character.isWhitespace(json.charAt(previous)))
++            previous--;
++        String comma = previous >= 0 && json.charAt(previous) != '{' ? "," : "";
++        return json.substring(0, closingBrace) + comma + "\n  \"" + key +
++            "\": " + value + "\n" + json.substring(closingBrace);
++    }
++
 +    private void setGameAreaScale(int percent)
 +    {
 +        int clamped = Math.max(SideMenu.MIN_GAME_AREA_SCALE,
@@ -432,6 +716,10 @@ index be544a2..93e1798 100644
 +            LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
 +        mLayout.addView(mGameSurfaceContainer, 0, containerParams);
 +        mGameSurfaceContainer.addView(mSurface);
++        mCrtOverlay = new CrtOverlayView(this);
++        mCrtOverlay.setClickable(false);
++        mCrtOverlay.setFocusable(false);
++        mGameSurfaceContainer.addView(mCrtOverlay);
 +    }
 +
 +    private void applySurfaceLayoutMode(int mode, int areaScalePercent)
@@ -452,12 +740,53 @@ index be544a2..93e1798 100644
 +                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.CENTER);
 +        }
 +        mSurface.setLayoutParams(surfaceParams);
++        if (mCrtOverlay != null) {
++            FrameLayout.LayoutParams overlayParams = new FrameLayout.LayoutParams(
++                surfaceParams.width, surfaceParams.height, Gravity.CENTER);
++            mCrtOverlay.setLayoutParams(overlayParams);
++        }
++    }
++
++    private void applyCrtOverlay(int filter)
++    {
++        if (mCrtOverlay != null)
++            mCrtOverlay.setVisibility(
++                filter == SideMenu.FILTER_CRT ? View.VISIBLE : View.GONE);
++    }
++
++    private static final class CrtOverlayView extends View
++    {
++        private final Paint mScanlinePaint = new Paint();
++        private final Paint mEdgePaint = new Paint();
++
++        CrtOverlayView(Context context)
++        {
++            super(context);
++            mScanlinePaint.setColor(0x30000000);
++            mScanlinePaint.setStyle(Paint.Style.FILL);
++            mScanlinePaint.setAntiAlias(false);
++            mEdgePaint.setColor(0x22000000);
++            mEdgePaint.setStyle(Paint.Style.STROKE);
++            mEdgePaint.setStrokeWidth(8f);
++            setWillNotDraw(false);
++        }
++
++        @Override
++        protected void onDraw(Canvas canvas)
++        {
++            super.onDraw(canvas);
++            int width = getWidth();
++            int height = getHeight();
++            for (int y = 1; y < height; y += 4)
++                canvas.drawRect(0, y, width, y + 1, mScanlinePaint);
++            canvas.drawRect(0, 0, width, height, mEdgePaint);
++        }
 +    }
 +
      /**
       * This static method is used in native mkxp-z. (see systemImpl.cpp)
       * This method returns a string of current device locale tag. (e.g. "en_US")
-@@ -681,6 +883,116 @@ public class MainActivity extends SDLActivity
+@@ -681,6 +1179,116 @@ public class MainActivity extends SDLActivity
          }).start();
      }
  
@@ -574,7 +903,7 @@ index be544a2..93e1798 100644
      /**
       * Searches for the directory that actually contains a game, starting from
       * {@code root} and descending into its subdirectories.
-@@ -810,33 +1122,4 @@ public class MainActivity extends SDLActivity
+@@ -810,33 +1418,4 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
@@ -609,7 +938,7 @@ index be544a2..93e1798 100644
 -    }
  }
 diff --git a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
-index 155e305..e545c39 100644
+index 155e305..12de638 100644
 --- a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
 +++ b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
 @@ -4,14 +4,17 @@ import android.content.Context;
@@ -632,7 +961,7 @@ index 155e305..e545c39 100644
  import android.widget.Switch;
  import android.widget.TextView;
  
-@@ -22,12 +25,20 @@ import com.mkxpz.R;
+@@ -22,12 +25,23 @@ import com.mkxpz.R;
   *
   * <p>The menu is kept as a set of sibling views added to the activity's
   * content {@link RelativeLayout}, so it does not require restructuring the
@@ -648,6 +977,9 @@ index 155e305..e545c39 100644
 +    public static final int DISPLAY_KEEP_ASPECT = 0;
 +    public static final int DISPLAY_FILL_SCREEN = 1;
 +    public static final int DISPLAY_ORIGINAL_SIZE = 2;
++    public static final int FILTER_PIXEL = 0;
++    public static final int FILTER_BILINEAR = 1;
++    public static final int FILTER_CRT = 2;
 +    public static final int MIN_GAME_AREA_SCALE = 100;
 +    public static final int MAX_GAME_AREA_SCALE = 250;
 +    public static final int DEFAULT_GAME_AREA_SCALE = 150;
@@ -656,7 +988,7 @@ index 155e305..e545c39 100644
      public interface OnLoadArchiveListener
      {
          void onLoadArchive();
-@@ -48,43 +59,66 @@ public class SideMenu
+@@ -48,43 +62,76 @@ public class SideMenu
          void onFpsOverlayToggle(boolean enabled);
      }
  
@@ -680,6 +1012,11 @@ index 155e305..e545c39 100644
 +        void onGameAreaScaleChange(int percent);
 +    }
 +
++    public interface OnGraphicsFilterChangeListener
++    {
++        void onGraphicsFilterChange(int filter);
++    }
++
      private final Context mContext;
      private final ViewGroup mRoot;
  
@@ -697,6 +1034,10 @@ index 155e305..e545c39 100644
 +    private RadioButton mIntegerSizeOption;
 +    private TextView mGameAreaScaleLabel;
 +    private SeekBar mGameAreaScaleSlider;
++    private RadioGroup mGraphicsFilterGroup;
++    private RadioButton mPixelFilterOption;
++    private RadioButton mBilinearFilterOption;
++    private RadioButton mCrtFilterOption;
  
      private final int mPanelWidth;
 -    private final int mHandleWidth;
@@ -711,6 +1052,7 @@ index 155e305..e545c39 100644
 +    private OnMuteToggleListener mOnMuteToggleListener = muted -> {};
 +    private OnTouchControlsToggleListener mOnTouchControlsToggleListener = enabled -> {};
 +    private OnGameAreaScaleChangeListener mOnGameAreaScaleChangeListener = percent -> {};
++    private OnGraphicsFilterChangeListener mOnGraphicsFilterChangeListener = filter -> {};
  
      private boolean mOpen = false;
 -    private boolean mDidDrag = false;
@@ -735,7 +1077,7 @@ index 155e305..e545c39 100644
  
          build();
          setOffset(-mPanelWidth);
-@@ -110,12 +144,68 @@ public class SideMenu
+@@ -110,12 +157,85 @@ public class SideMenu
          mOnFpsOverlayToggleListener = listener;
      }
  
@@ -757,6 +1099,11 @@ index 155e305..e545c39 100644
 +    public void setOnGameAreaScaleChangeListener(OnGameAreaScaleChangeListener listener)
 +    {
 +        mOnGameAreaScaleChangeListener = listener;
++    }
++
++    public void setOnGraphicsFilterChangeListener(OnGraphicsFilterChangeListener listener)
++    {
++        mOnGraphicsFilterChangeListener = listener;
 +    }
 +
      public void setFpsOverlayEnabled(boolean enabled)
@@ -801,10 +1148,22 @@ index 155e305..e545c39 100644
 +        updateGameAreaScaleLabel(value);
 +    }
 +
++    public void setGraphicsFilter(int filter)
++    {
++        if (mGraphicsFilterGroup == null)
++            return;
++        if (filter == FILTER_BILINEAR)
++            mBilinearFilterOption.setChecked(true);
++        else if (filter == FILTER_CRT)
++            mCrtFilterOption.setChecked(true);
++        else
++            mPixelFilterOption.setChecked(true);
++    }
++
      public void setGamePath(String path)
      {
          if (mGamePathView != null)
-@@ -142,25 +232,40 @@ public class SideMenu
+@@ -142,25 +262,40 @@ public class SideMenu
          mPanel = new LinearLayout(mContext);
          mPanel.setOrientation(LinearLayout.VERTICAL);
          mPanel.setBackgroundColor(Color.rgb(22, 22, 22));
@@ -849,7 +1208,7 @@ index 155e305..e545c39 100644
  
          Button loadArchive = new Button(mContext);
          loadArchive.setText(R.string.load_archive);
-@@ -173,7 +278,90 @@ public class SideMenu
+@@ -173,7 +308,121 @@ public class SideMenu
              close();
              mOnLoadArchiveListener.onLoadArchive();
          });
@@ -923,6 +1282,37 @@ index 155e305..e545c39 100644
 +        setGameAreaScale(DEFAULT_GAME_AREA_SCALE);
 +        updateGameAreaScaleEnabled(false);
 +
++        TextView filterLabel = new TextView(mContext);
++        filterLabel.setText(R.string.graphics_filter);
++        filterLabel.setTextColor(Color.WHITE);
++        filterLabel.setTextSize(14f);
++        LinearLayout.LayoutParams filterLabelLp = new LinearLayout.LayoutParams(
++            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++        filterLabelLp.setMargins(0, dp(20), 0, dp(4));
++        filterLabel.setLayoutParams(filterLabelLp);
++        content.addView(filterLabel);
++
++        mGraphicsFilterGroup = new RadioGroup(mContext);
++        mGraphicsFilterGroup.setOrientation(RadioGroup.VERTICAL);
++        mPixelFilterOption = makeRadioButton(R.string.filter_pixel);
++        mBilinearFilterOption = makeRadioButton(R.string.filter_bilinear);
++        mCrtFilterOption = makeRadioButton(R.string.filter_crt);
++        mGraphicsFilterGroup.addView(mPixelFilterOption);
++        mGraphicsFilterGroup.addView(mBilinearFilterOption);
++        mGraphicsFilterGroup.addView(mCrtFilterOption);
++        mGraphicsFilterGroup.setOnCheckedChangeListener((group, checkedId) -> {
++            if (checkedId == mBilinearFilterOption.getId())
++                mOnGraphicsFilterChangeListener.onGraphicsFilterChange(FILTER_BILINEAR);
++            else if (checkedId == mCrtFilterOption.getId())
++                mOnGraphicsFilterChangeListener.onGraphicsFilterChange(FILTER_CRT);
++            else if (checkedId == mPixelFilterOption.getId())
++                mOnGraphicsFilterChangeListener.onGraphicsFilterChange(FILTER_PIXEL);
++        });
++        content.addView(mGraphicsFilterGroup);
++
++        TextView filterHint = makeHint(R.string.graphics_filter_restart_hint);
++        content.addView(filterHint);
++
 +        addSectionHeader(content, R.string.section_controls);
 +
 +        mTouchControlsToggle = makeSwitch(R.string.show_touch_controls);
@@ -941,7 +1331,7 @@ index 155e305..e545c39 100644
  
          Button importSaves = new Button(mContext);
          importSaves.setText(R.string.import_saves);
-@@ -186,7 +374,7 @@ public class SideMenu
+@@ -186,7 +435,7 @@ public class SideMenu
              close();
              mOnImportSavesListener.onImportSaves();
          });
@@ -950,7 +1340,7 @@ index 155e305..e545c39 100644
  
          Button exportSaves = new Button(mContext);
          exportSaves.setText(R.string.export_saves);
-@@ -199,112 +387,116 @@ public class SideMenu
+@@ -199,112 +448,116 @@ public class SideMenu
              close();
              mOnExportSavesListener.onExportSaves();
          });
@@ -1151,7 +1541,7 @@ index 155e305..e545c39 100644
      }
  
      private void setOffset(float offset)
-@@ -323,7 +515,7 @@ public class SideMenu
+@@ -323,7 +576,7 @@ public class SideMenu
      public void open()
      {
          mOpen = true;
@@ -1160,7 +1550,7 @@ index 155e305..e545c39 100644
          mPanel.setVisibility(View.VISIBLE);
          mScrim.setVisibility(View.VISIBLE);
          animateTo(0f);
-@@ -333,8 +525,7 @@ public class SideMenu
+@@ -333,8 +586,7 @@ public class SideMenu
      {
          mOpen = false;
          animateTo(-mPanelWidth);
@@ -1171,26 +1561,29 @@ index 155e305..e545c39 100644
  
      public void toggle()
 diff --git a/android/app/src/main/java/org/libsdl/app/SDLAudioManager.java b/android/app/src/main/java/org/libsdl/app/SDLAudioManager.java
-index 7c821a4..56bad33 100644
+index 7c821a4..7f546a2 100644
 --- a/android/app/src/main/java/org/libsdl/app/SDLAudioManager.java
 +++ b/android/app/src/main/java/org/libsdl/app/SDLAudioManager.java
-@@ -19,6 +19,7 @@ public class SDLAudioManager {
+@@ -19,6 +19,8 @@ public class SDLAudioManager {
      protected static AudioTrack mAudioTrack;
      protected static AudioRecord mAudioRecord;
      protected static Context mContext;
 +    private static volatile boolean mMuted;
++    private static volatile boolean mPlaybackPaused;
  
      private static final int[] NO_DEVICES = {};
  
-@@ -269,6 +270,7 @@ public class SDLAudioManager {
+@@ -269,6 +271,9 @@ public class SDLAudioManager {
                  }
  
                  mAudioTrack.play();
 +                mAudioTrack.setVolume(mMuted ? 0.0f : 1.0f);
++                if (mPlaybackPaused)
++                    mAudioTrack.pause();
              }
  
              results[0] = mAudioTrack.getSampleRate();
-@@ -477,6 +479,15 @@ public class SDLAudioManager {
+@@ -477,6 +482,31 @@ public class SDLAudioManager {
          }
      }
  
@@ -1203,14 +1596,30 @@ index 7c821a4..56bad33 100644
 +        }
 +    }
 +
++    /** Pauses this app's playback for lifecycle and audio-focus interruptions. */
++    public static void setPlaybackPaused(boolean paused) {
++        mPlaybackPaused = paused;
++        AudioTrack track = mAudioTrack;
++        if (track == null || track.getState() != AudioTrack.STATE_INITIALIZED)
++            return;
++        try {
++            if (paused)
++                track.pause();
++            else
++                track.play();
++        } catch (IllegalStateException e) {
++            Log.w(TAG, "Unable to change SDL playback state", e);
++        }
++    }
++
      /** This method is called by SDL using JNI. */
      public static void captureClose() {
          if (mAudioRecord != null) {
 diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
-index 9e37fed..21555fb 100644
+index 9e37fed..bf3d253 100644
 --- a/android/app/src/main/res/values/strings.xml
 +++ b/android/app/src/main/res/values/strings.xml
-@@ -1,11 +1,31 @@
+@@ -1,11 +1,43 @@
  <?xml version="1.0" encoding="utf-8"?>
  <resources>
      <!-- Main application name -->
@@ -1244,6 +1653,18 @@ index 9e37fed..21555fb 100644
 +    <string name="display_apply_failed">Não foi possível aplicar o modo de tela.</string>
 +    <string name="game_area_scale">Tamanho da área do jogo: %1$d%%</string>
 +    <string name="game_area_scale_hint">Disponível no modo Tamanho original. A alteração aparece imediatamente.</string>
++    <string name="graphics_filter">Filtro gráfico</string>
++    <string name="filter_pixel">Pixels nítidos</string>
++    <string name="filter_bilinear">Bilinear suave</string>
++    <string name="filter_crt">CRT (scanlines)</string>
++    <string name="graphics_filter_restart_hint">A troca de filtro exige reiniciar o jogo.</string>
++    <string name="filter_restart_title">Aplicar filtro gráfico?</string>
++    <string name="filter_restart_message">Salve seu progresso antes de continuar. O jogo será reiniciado para aplicar o filtro.</string>
++    <string name="filter_restarting">Aplicando filtro gráfico…</string>
++    <string name="filter_apply_failed">Não foi possível aplicar o filtro gráfico.</string>
 +    <string name="show_touch_controls">Mostrar controles na tela</string>
 +    <string name="mute_audio">Silenciar jogo</string>
++    <string name="whats_new_title">Novidades da versão %1$s</string>
++    <string name="whats_new_message">• Pausa automática ao minimizar, bloquear a tela ou receber uma chamada.\n\n• Reconexão de controles Bluetooth e USB sem reiniciar o aplicativo.\n\n• Filtros Pixels nítidos, Bilinear suave e CRT.\n\n• Nova tela de novidades após cada atualização.</string>
++    <string name="got_it">Entendi</string>
  </resources>
