@@ -87,7 +87,7 @@ index a90712f..21d92e7 100644
      </application>
  </manifest>
 diff --git a/android/app/src/main/java/com/mkxpz/MainActivity.java b/android/app/src/main/java/com/mkxpz/MainActivity.java
-index be544a2..5177de0 100644
+index be544a2..861d9c6 100644
 --- a/android/app/src/main/java/com/mkxpz/MainActivity.java
 +++ b/android/app/src/main/java/com/mkxpz/MainActivity.java
 @@ -3,6 +3,7 @@ package com.mkxpz;
@@ -135,7 +135,7 @@ index be544a2..5177de0 100644
  import java.io.IOException;
  import java.io.InputStream;
  import java.nio.charset.StandardCharsets;
-@@ -42,6 +50,8 @@ import java.util.regex.Matcher;
+@@ -42,11 +50,14 @@ import java.util.regex.Matcher;
  import java.util.regex.Pattern;
  
  import org.libsdl.app.SDLActivity;
@@ -144,7 +144,13 @@ index be544a2..5177de0 100644
  import com.mkxpz.gamepad.Gamepad;
  import com.mkxpz.gamepad.GamepadConfig;
  import com.mkxpz.launcher.SideMenu;
-@@ -65,7 +75,16 @@ public class MainActivity extends SDLActivity
+ import com.mkxpz.launcher.ArchiveExtractor;
+ import com.mkxpz.launcher.SaveTransfer;
++import com.mkxpz.launcher.ErrorReport;
+ 
+ public class MainActivity extends SDLActivity
+ {
+@@ -65,10 +76,20 @@ public class MainActivity extends SDLActivity
  
      private static final String PREFS_NAME = "mkxpz_prefs";
      private static final String PREFS_GAME_PATH = "game_path";
@@ -161,7 +167,11 @@ index be544a2..5177de0 100644
      private static final int REQUEST_LOAD_ARCHIVE = 200;
      private static final int REQUEST_IMPORT_SAVES = 201;
      private static final int REQUEST_EXPORT_SAVES = 202;
-@@ -87,19 +106,62 @@ public class MainActivity extends SDLActivity
++    private static final int REQUEST_EXPORT_ERROR_REPORT = 203;
+ 
+     protected boolean mStarted = false;
+ 
+@@ -87,19 +108,62 @@ public class MainActivity extends SDLActivity
      // In-screen gamepad
      private final Gamepad mGamepad = new Gamepad();
      private boolean mGamepadInvisible = false;
@@ -226,7 +236,17 @@ index be544a2..5177de0 100644
  
          // Run (resume) native SDL thread
          if (mHasMultiWindow) {
-@@ -176,8 +238,26 @@ public class MainActivity extends SDLActivity
+@@ -153,6 +217,9 @@ public class MainActivity extends SDLActivity
+             if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                 exportSaves(data.getData());
+             }
++        } else if (requestCode == REQUEST_EXPORT_ERROR_REPORT) {
++            if (resultCode == RESULT_OK && data != null && data.getData() != null)
++                exportErrorReport(data.getData());
+         }
+     }
+ 
+@@ -176,8 +243,26 @@ public class MainActivity extends SDLActivity
          GAME_PATH_DEFAULT = new File(gameRootBase, "mkxp-z").getAbsolutePath();
          GAME_PATH = GAME_PATH_DEFAULT;
  
@@ -253,7 +273,7 @@ index be544a2..5177de0 100644
          mStorageManager = (StorageManager) getSystemService(STORAGE_SERVICE);
          mVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
  
-@@ -196,9 +276,10 @@ public class MainActivity extends SDLActivity
+@@ -196,9 +281,10 @@ public class MainActivity extends SDLActivity
          }
  
          // Setup in-screen gamepad
@@ -265,7 +285,7 @@ index be544a2..5177de0 100644
          mGamepad.setOnKeyDownListener(SDLActivity::onNativeKeyDown);
          mGamepad.setOnKeyUpListener(SDLActivity::onNativeKeyUp);
  
-@@ -206,7 +287,7 @@ public class MainActivity extends SDLActivity
+@@ -206,7 +292,7 @@ public class MainActivity extends SDLActivity
              mGamepad.attachTo(this, mLayout);
          }
  
@@ -274,7 +294,7 @@ index be544a2..5177de0 100644
          tvFps = new TextView(this);
          tvFps.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
          tvFps.setTextColor(Color.WHITE);
-@@ -220,14 +301,16 @@ public class MainActivity extends SDLActivity
+@@ -220,14 +306,16 @@ public class MainActivity extends SDLActivity
          tvFps.setPadding(dpPx(10), dpPx(4), dpPx(10), dpPx(4));
          tvFps.setVisibility(View.GONE);
  
@@ -294,7 +314,7 @@ index be544a2..5177de0 100644
          String savedGamePath = prefs.getString(PREFS_GAME_PATH, null);
          if (savedGamePath != null && new File(savedGamePath).isDirectory()) {
              GAME_PATH = savedGamePath;
-@@ -240,13 +323,23 @@ public class MainActivity extends SDLActivity
+@@ -240,13 +328,24 @@ public class MainActivity extends SDLActivity
          mSideMenu = new SideMenu(this, mLayout);
          mSideMenu.setGamePath(GAME_PATH);
          mSideMenu.setFpsOverlayEnabled(fpsOverlayEnabled);
@@ -318,10 +338,11 @@ index be544a2..5177de0 100644
 -
 -        // Briefly hint at the grab handle on first launch.
 -        mSideMenu.revealHandle();
++        mSideMenu.setOnExportErrorReportListener(this::pickExportErrorReport);
      }
  
      @Override
-@@ -261,16 +354,16 @@ public class MainActivity extends SDLActivity
+@@ -261,16 +360,16 @@ public class MainActivity extends SDLActivity
  
                  // Try to mount main OBB file
                  mStorageManager.mountObb(OBB_MAIN_FILENAME, null, obbListener);
@@ -343,7 +364,7 @@ index be544a2..5177de0 100644
              }
          } else {
              // onStart: Resume SDL thread
-@@ -278,9 +371,33 @@ public class MainActivity extends SDLActivity
+@@ -278,9 +377,33 @@ public class MainActivity extends SDLActivity
          }
      }
  
@@ -377,7 +398,7 @@ index be544a2..5177de0 100644
          super.onDestroy();
  
          // HACK: Exiting the JVM (process) since Ruby does not like when we
-@@ -289,6 +406,83 @@ public class MainActivity extends SDLActivity
+@@ -289,6 +412,83 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
@@ -461,7 +482,7 @@ index be544a2..5177de0 100644
      @Override
      public boolean dispatchKeyEvent(KeyEvent evt)
      {
-@@ -315,11 +509,9 @@ public class MainActivity extends SDLActivity
+@@ -315,11 +515,9 @@ public class MainActivity extends SDLActivity
      @Override
      public boolean dispatchTouchEvent(MotionEvent evt)
      {
@@ -475,7 +496,7 @@ index be544a2..5177de0 100644
              mGamepad.showView();
              mGamepadInvisible = false;
          }
-@@ -392,6 +584,327 @@ public class MainActivity extends SDLActivity
+@@ -392,6 +590,327 @@ public class MainActivity extends SDLActivity
              tvFps.setVisibility(View.GONE);
      }
  
@@ -803,7 +824,176 @@ index be544a2..5177de0 100644
      /**
       * This static method is used in native mkxp-z. (see systemImpl.cpp)
       * This method returns a string of current device locale tag. (e.g. "en_US")
-@@ -681,6 +1194,116 @@ public class MainActivity extends SDLActivity
+@@ -488,6 +1007,7 @@ public class MainActivity extends SDLActivity
+         intent.setType("*/*");
+         // .rxdata/.rvdata files have no standard MIME type.
+         intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
++            "application/zip",
+             "application/octet-stream",
+             "application/x-rpgmaker"
+         });
+@@ -496,15 +1016,26 @@ public class MainActivity extends SDLActivity
+     }
+ 
+     /**
+-     * Launches the system folder picker so the user can choose where to export
+-     * the game's save files.
++     * Launches the system document picker for one portable save ZIP.
+      */
+     private void pickExportSaves()
+     {
+-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
++        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
++        intent.addCategory(Intent.CATEGORY_OPENABLE);
++        intent.setType("application/zip");
++        intent.putExtra(Intent.EXTRA_TITLE, "Nordeluna-saves.zip");
+         startActivityForResult(intent, REQUEST_EXPORT_SAVES);
+     }
+ 
++    private void pickExportErrorReport()
++    {
++        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
++        intent.addCategory(Intent.CATEGORY_OPENABLE);
++        intent.setType("application/zip");
++        intent.putExtra(Intent.EXTRA_TITLE, "Nordeluna-relatorio-de-erro.zip");
++        startActivityForResult(intent, REQUEST_EXPORT_ERROR_REPORT);
++    }
++
+     /**
+      * The directories where the game may keep its save files. RPG Maker's
+      * {@code save_data} writes into the game folder, but games that use
+@@ -549,64 +1080,104 @@ public class MainActivity extends SDLActivity
+         final File[] roots = saveRoots();
+ 
+         new Thread(() -> {
+-            final int imported = SaveTransfer.importSaves(MainActivity.this, uris, roots);
++            int result = 0;
++            String failure = null;
++            File backup = null;
++            try {
++                backup = SaveTransfer.backupBeforeImport(MainActivity.this, roots,
++                    BuildConfig.VERSION_NAME);
++                result = SaveTransfer.importSaves(MainActivity.this, uris, roots);
++            } catch (IOException e) {
++                failure = e.getMessage();
++                Log.e(TAG, "Safe save import failed", e);
++            }
++            final int imported = result;
++            final String error = failure;
++            final File safetyBackup = backup;
+ 
+             runOnUiThread(() -> {
+                 dialog.dismiss();
+ 
+-                if (imported == 0) {
++                if (error != null) {
+                     Toast.makeText(MainActivity.this,
+-                        "No save files were imported", Toast.LENGTH_LONG).show();
++                        "Falha ao importar: " + error, Toast.LENGTH_LONG).show();
++                } else if (imported == 0) {
++                    Toast.makeText(MainActivity.this,
++                        "Nenhum save foi importado", Toast.LENGTH_LONG).show();
+                 } else {
+                     Toast.makeText(MainActivity.this,
+-                        "Imported " + imported + " save file" + (imported == 1 ? "" : "s"),
++                        "Importados " + imported + " save(s)" +
++                        (safetyBackup != null ? ". Backup anterior protegido." : ""),
+                         Toast.LENGTH_LONG).show();
+                 }
+             });
+         }).start();
+     }
+ 
+-    /**
+-     * Copies the game's save files into the user-selected folder.
+-     */
+-    private void exportSaves(Uri treeUri)
++    /** Packages the saves and device/version metadata into one portable ZIP. */
++    private void exportSaves(Uri destination)
+     {
+-        // Keep access to the chosen folder so the exported files stay readable.
+-        try {
+-            getContentResolver().takePersistableUriPermission(treeUri,
+-                Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+-        } catch (SecurityException e) {
+-            Log.w(TAG, "Could not persist access to " + treeUri, e);
+-        }
+-
+         final ProgressDialog dialog = new ProgressDialog(this);
+-        dialog.setMessage("Exporting save data\u2026");
++        dialog.setMessage("Criando ZIP dos saves\u2026");
+         dialog.setCancelable(false);
+         dialog.show();
+ 
+         final File[] roots = saveRoots();
+ 
+         new Thread(() -> {
+-            final int total = SaveTransfer.findSaveFiles(roots).size();
+-            final int exported = SaveTransfer.exportSaves(MainActivity.this, treeUri, roots);
++            int result = 0;
++            String failure = null;
++            try {
++                result = SaveTransfer.exportSavesZip(MainActivity.this, destination, roots,
++                    BuildConfig.VERSION_NAME);
++            } catch (IOException e) {
++                failure = e.getMessage();
++                Log.e(TAG, "Save ZIP export failed", e);
++            }
++            final int exported = result;
++            final String error = failure;
+ 
+             runOnUiThread(() -> {
+                 dialog.dismiss();
+ 
+-                if (total == 0) {
++                if (error != null) {
+                     Toast.makeText(MainActivity.this,
+-                        "No save data found to export", Toast.LENGTH_LONG).show();
+-                } else if (exported < total) {
++                        "Falha ao exportar: " + error, Toast.LENGTH_LONG).show();
++                } else if (exported == 0) {
+                     Toast.makeText(MainActivity.this,
+-                        "Exported " + exported + " of " + total + " save files",
+-                        Toast.LENGTH_LONG).show();
++                        "ZIP criado, mas nenhum save foi encontrado", Toast.LENGTH_LONG).show();
+                 } else {
+                     Toast.makeText(MainActivity.this,
+-                        "Exported " + exported + " save file" + (exported == 1 ? "" : "s"),
++                        "ZIP criado com " + exported + " save(s)",
+                         Toast.LENGTH_LONG).show();
+                 }
+             });
+-        }).start();
++        }, "Nordeluna save exporter").start();
++    }
++
++    private void exportErrorReport(Uri destination)
++    {
++        final ProgressDialog dialog = new ProgressDialog(this);
++        dialog.setMessage("Gerando relatório de erro\u2026");
++        dialog.setCancelable(false);
++        dialog.show();
++        new Thread(() -> {
++            String failure = null;
++            try {
++                ErrorReport.write(MainActivity.this, destination,
++                    BuildConfig.VERSION_NAME, GAME_PATH);
++            } catch (IOException e) {
++                failure = e.getMessage();
++                Log.e(TAG, "Error report export failed", e);
++            }
++            final String error = failure;
++            runOnUiThread(() -> {
++                dialog.dismiss();
++                Toast.makeText(MainActivity.this,
++                    error == null ? "Relatório exportado" : "Falha ao exportar: " + error,
++                    Toast.LENGTH_LONG).show();
++            });
++        }, "Nordeluna report exporter").start();
+     }
+ 
+     /**
+@@ -681,6 +1252,116 @@ public class MainActivity extends SDLActivity
          }).start();
      }
  
@@ -920,7 +1110,7 @@ index be544a2..5177de0 100644
      /**
       * Searches for the directory that actually contains a game, starting from
       * {@code root} and descending into its subdirectories.
-@@ -810,33 +1433,4 @@ public class MainActivity extends SDLActivity
+@@ -810,33 +1491,4 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
@@ -1267,8 +1457,256 @@ index 0e8b645..abb2adf 100644
 -}
 \ No newline at end of file
 +}
+diff --git a/android/app/src/main/java/com/mkxpz/launcher/ErrorReport.java b/android/app/src/main/java/com/mkxpz/launcher/ErrorReport.java
+new file mode 100644
+index 0000000..3603414
+--- /dev/null
++++ b/android/app/src/main/java/com/mkxpz/launcher/ErrorReport.java
+@@ -0,0 +1,75 @@
++package com.mkxpz.launcher;
++
++import android.content.Context;
++import android.net.Uri;
++import android.os.Build;
++
++import java.io.BufferedReader;
++import java.io.IOException;
++import java.io.InputStreamReader;
++import java.io.OutputStream;
++import java.nio.charset.StandardCharsets;
++import java.text.SimpleDateFormat;
++import java.util.Date;
++import java.util.Locale;
++import java.util.zip.ZipEntry;
++import java.util.zip.ZipOutputStream;
++
++/** Creates a privacy-conscious diagnostic package selected by the user. */
++public final class ErrorReport
++{
++    private ErrorReport() { }
++
++    public static void write(Context context, Uri destination, String appVersion,
++                             String gamePath) throws IOException
++    {
++        try (OutputStream raw = context.getContentResolver().openOutputStream(destination, "w");
++             ZipOutputStream zip = raw == null ? null : new ZipOutputStream(raw)) {
++            if (zip == null)
++                throw new IOException("Não foi possível criar o relatório");
++
++            String info = "Aplicativo: Pokémon Nordeluna\n" +
++                "Versão: " + appVersion + "\n" +
++                "Data: " + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.ROOT)
++                    .format(new Date()) + "\n" +
++                "Fabricante: " + Build.MANUFACTURER + "\n" +
++                "Modelo: " + Build.MODEL + "\n" +
++                "Dispositivo: " + Build.DEVICE + "\n" +
++                "Android: " + Build.VERSION.RELEASE + "\n" +
++                "API: " + Build.VERSION.SDK_INT + "\n" +
++                "ABI: " + (Build.SUPPORTED_ABIS.length > 0 ? Build.SUPPORTED_ABIS[0] : "desconhecida") + "\n" +
++                "Caminho do jogo disponível: " + (gamePath != null) + "\n";
++            addText(zip, "informacoes.txt", info);
++            addText(zip, "logcat.txt", readLogcat());
++        }
++    }
++
++    private static String readLogcat()
++    {
++        StringBuilder output = new StringBuilder();
++        try {
++            Process process = new ProcessBuilder("logcat", "-d", "-v", "threadtime", "-t", "1200")
++                .redirectErrorStream(true).start();
++            try (BufferedReader reader = new BufferedReader(
++                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
++                String line;
++                while ((line = reader.readLine()) != null)
++                    output.append(line).append('\n');
++            }
++            process.destroy();
++        } catch (Exception e) {
++            output.append("Não foi possível coletar o log: ").append(e).append('\n');
++        }
++        if (output.length() == 0)
++            output.append("Nenhuma linha de log estava disponível.\n");
++        return output.toString();
++    }
++
++    private static void addText(ZipOutputStream zip, String name, String value)
++        throws IOException
++    {
++        zip.putNextEntry(new ZipEntry(name));
++        zip.write(value.getBytes(StandardCharsets.UTF_8));
++        zip.closeEntry();
++    }
++}
+diff --git a/android/app/src/main/java/com/mkxpz/launcher/SaveTransfer.java b/android/app/src/main/java/com/mkxpz/launcher/SaveTransfer.java
+index fa96fbb..091566b 100644
+--- a/android/app/src/main/java/com/mkxpz/launcher/SaveTransfer.java
++++ b/android/app/src/main/java/com/mkxpz/launcher/SaveTransfer.java
+@@ -7,6 +7,7 @@ import android.net.Uri;
+ import android.provider.DocumentsContract;
+ import android.provider.OpenableColumns;
+ import android.util.Log;
++import android.os.Build;
+ 
+ import java.io.File;
+ import java.io.FileInputStream;
+@@ -18,6 +19,12 @@ import java.util.ArrayList;
+ import java.util.LinkedHashMap;
+ import java.util.List;
+ import java.util.Map;
++import java.text.SimpleDateFormat;
++import java.util.Date;
++import java.util.Locale;
++import java.util.zip.ZipEntry;
++import java.util.zip.ZipInputStream;
++import java.util.zip.ZipOutputStream;
+ 
+ /**
+  * Imports and exports RPG Maker save files ({@code .rxdata}, {@code .rvdata}
+@@ -41,6 +48,7 @@ public final class SaveTransfer
+     private static final String SAVE_MIME = "application/octet-stream";
+ 
+     private static final int BUFFER_SIZE = 64 * 1024;
++    private static final String ZIP_MIME = "application/zip";
+ 
+     private SaveTransfer() { }
+ 
+@@ -123,6 +131,53 @@ public final class SaveTransfer
+         return exported;
+     }
+ 
++    /** Writes all saves and a human-readable metadata file to one portable ZIP. */
++    public static int exportSavesZip(Context context, Uri destination, File[] roots,
++                                     String appVersion) throws IOException
++    {
++        List<File> saves = findSaveFiles(roots);
++        try (OutputStream raw = context.getContentResolver().openOutputStream(destination, "w");
++             ZipOutputStream zip = raw == null ? null : new ZipOutputStream(raw)) {
++            if (zip == null)
++                throw new IOException("Não foi possível criar o ZIP");
++            zip.putNextEntry(new ZipEntry("nordeluna-save-info.txt"));
++            String metadata = "Jogo: Pokémon Nordeluna\n" +
++                "Versão do aplicativo: " + appVersion + "\n" +
++                "Data do backup: " + timestamp() + "\n" +
++                "Aparelho: " + Build.MANUFACTURER + " " + Build.MODEL + "\n" +
++                "Android: " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")\n" +
++                "Quantidade de saves: " + saves.size() + "\n";
++            zip.write(metadata.getBytes("UTF-8"));
++            zip.closeEntry();
++            for (File save : saves)
++                addFileToZip(zip, save, "saves/" + save.getName());
++        }
++        return saves.size();
++    }
++
++    /** Creates an internal recovery point immediately before an import. */
++    public static File backupBeforeImport(Context context, File[] roots, String appVersion)
++        throws IOException
++    {
++        List<File> saves = findSaveFiles(roots);
++        if (saves.isEmpty())
++            return null;
++        File directory = new File(context.getFilesDir(), "save-backups");
++        if (!directory.exists() && !directory.mkdirs())
++            throw new IOException("Não foi possível criar a pasta de backups");
++        File backup = new File(directory, "antes-da-importacao-" + fileTimestamp() + ".zip");
++        try (ZipOutputStream zip = new ZipOutputStream(new FileOutputStream(backup))) {
++            zip.putNextEntry(new ZipEntry("backup-info.txt"));
++            zip.write(("Backup automático antes da importação\nVersão: " + appVersion +
++                "\nData: " + timestamp() + "\n").getBytes("UTF-8"));
++            zip.closeEntry();
++            for (File save : saves)
++                addFileToZip(zip, save, "saves/" + save.getName());
++        }
++        pruneBackups(directory, 5);
++        return backup;
++    }
++
+     /**
+      * Copies each selected document into every candidate root, overwriting any
+      * existing file with the same name. Non-save files are skipped.
+@@ -140,6 +195,10 @@ public final class SaveTransfer
+                 if (name == null || name.isEmpty())
+                     name = new File(uri.getLastPathSegment()).getName();
+ 
++                if (name.toLowerCase(Locale.ROOT).endsWith(".zip")) {
++                    imported += importZip(context, uri, roots);
++                    continue;
++                }
+                 if (!isSaveFileName(name)) {
+                     Log.w(TAG, "Skipping non-save file: " + name);
+                     continue;
+@@ -168,6 +227,68 @@ public final class SaveTransfer
+         return imported;
+     }
+ 
++    private static int importZip(Context context, Uri uri, File[] roots) throws IOException
++    {
++        int imported = 0;
++        try (InputStream raw = context.getContentResolver().openInputStream(uri);
++             ZipInputStream zip = raw == null ? null : new ZipInputStream(raw)) {
++            if (zip == null)
++                throw new IOException("Não foi possível abrir o ZIP");
++            ZipEntry entry;
++            byte[] buffer = new byte[BUFFER_SIZE];
++            while ((entry = zip.getNextEntry()) != null) {
++                String safeName = new File(entry.getName()).getName();
++                if (entry.isDirectory() || !isSaveFileName(safeName))
++                    continue;
++                boolean copied = false;
++                for (File root : roots) {
++                    if (root == null || !root.isDirectory())
++                        continue;
++                    try (OutputStream out = new FileOutputStream(new File(root, safeName))) {
++                        int count;
++                        while ((count = zip.read(buffer)) > 0)
++                            out.write(buffer, 0, count);
++                    }
++                    copied = true;
++                }
++                if (copied)
++                    imported++;
++            }
++        }
++        return imported;
++    }
++
++    private static void addFileToZip(ZipOutputStream zip, File source, String entryName)
++        throws IOException
++    {
++        zip.putNextEntry(new ZipEntry(entryName));
++        try (InputStream in = new FileInputStream(source)) {
++            copy(in, zip);
++        }
++        zip.closeEntry();
++    }
++
++    private static void pruneBackups(File directory, int keep)
++    {
++        File[] files = directory.listFiles((dir, name) -> name.endsWith(".zip"));
++        if (files == null || files.length <= keep)
++            return;
++        java.util.Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
++        for (int i = keep; i < files.length; i++)
++            if (!files[i].delete())
++                Log.w(TAG, "Could not prune backup " + files[i]);
++    }
++
++    private static String timestamp()
++    {
++        return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.ROOT).format(new Date());
++    }
++
++    private static String fileTimestamp()
++    {
++        return new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(new Date());
++    }
++
+     private static boolean copyToTree(ContentResolver resolver, Uri treeUri, File source)
+         throws IOException
+     {
 diff --git a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
-index 155e305..cb15fe3 100644
+index 155e305..1595570 100644
 --- a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
 +++ b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
 @@ -4,14 +4,17 @@ import android.content.Context;
@@ -1318,7 +1756,17 @@ index 155e305..cb15fe3 100644
      public interface OnLoadArchiveListener
      {
          void onLoadArchive();
-@@ -48,43 +62,89 @@ public class SideMenu
+@@ -43,48 +57,100 @@ public class SideMenu
+         void onExportSaves();
+     }
+ 
++    public interface OnExportErrorReportListener
++    {
++        void onExportErrorReport();
++    }
++
+     public interface OnFpsOverlayToggleListener
+     {
          void onFpsOverlayToggle(boolean enabled);
      }
  
@@ -1388,6 +1836,7 @@ index 155e305..cb15fe3 100644
  
      private OnImportSavesListener mOnImportSavesListener = () -> {};
      private OnExportSavesListener mOnExportSavesListener = () -> {};
++    private OnExportErrorReportListener mOnExportErrorReportListener = () -> {};
      private OnFpsOverlayToggleListener mOnFpsOverlayToggleListener = enabled -> {};
 +    private OnDisplayModeChangeListener mOnDisplayModeChangeListener = mode -> {};
 +    private OnMuteToggleListener mOnMuteToggleListener = muted -> {};
@@ -1420,7 +1869,17 @@ index 155e305..cb15fe3 100644
  
          build();
          setOffset(-mPanelWidth);
-@@ -110,12 +170,101 @@ public class SideMenu
+@@ -105,17 +171,111 @@ public class SideMenu
+         mOnExportSavesListener = listener;
+     }
+ 
++    public void setOnExportErrorReportListener(OnExportErrorReportListener listener)
++    {
++        mOnExportErrorReportListener = listener;
++    }
++
+     public void setOnFpsOverlayToggleListener(OnFpsOverlayToggleListener listener)
+     {
          mOnFpsOverlayToggleListener = listener;
      }
  
@@ -1522,7 +1981,7 @@ index 155e305..cb15fe3 100644
      public void setGamePath(String path)
      {
          if (mGamePathView != null)
-@@ -142,25 +291,40 @@ public class SideMenu
+@@ -142,25 +302,40 @@ public class SideMenu
          mPanel = new LinearLayout(mContext);
          mPanel.setOrientation(LinearLayout.VERTICAL);
          mPanel.setBackgroundColor(Color.rgb(22, 22, 22));
@@ -1567,7 +2026,7 @@ index 155e305..cb15fe3 100644
  
          Button loadArchive = new Button(mContext);
          loadArchive.setText(R.string.load_archive);
-@@ -173,7 +337,134 @@ public class SideMenu
+@@ -173,7 +348,134 @@ public class SideMenu
              close();
              mOnLoadArchiveListener.onLoadArchive();
          });
@@ -1703,7 +2162,7 @@ index 155e305..cb15fe3 100644
  
          Button importSaves = new Button(mContext);
          importSaves.setText(R.string.import_saves);
-@@ -186,7 +477,7 @@ public class SideMenu
+@@ -186,7 +488,7 @@ public class SideMenu
              close();
              mOnImportSavesListener.onImportSaves();
          });
@@ -1712,7 +2171,7 @@ index 155e305..cb15fe3 100644
  
          Button exportSaves = new Button(mContext);
          exportSaves.setText(R.string.export_saves);
-@@ -199,112 +490,116 @@ public class SideMenu
+@@ -199,112 +501,124 @@ public class SideMenu
              close();
              mOnExportSavesListener.onExportSaves();
          });
@@ -1726,6 +2185,14 @@ index 155e305..cb15fe3 100644
 -            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 -        fpsLp.setMargins(0, dp(24), 0, 0);
 -        mFpsToggle.setLayoutParams(fpsLp);
++        Button exportErrorReport = new Button(mContext);
++        exportErrorReport.setText(R.string.export_error_report);
++        exportErrorReport.setOnClickListener(v -> {
++            close();
++            mOnExportErrorReportListener.onExportErrorReport();
++        });
++        content.addView(exportErrorReport);
++
 +        addSectionHeader(content, R.string.section_performance);
 +
 +        mFpsToggle = makeSwitch(R.string.show_fps);
@@ -1913,7 +2380,7 @@ index 155e305..cb15fe3 100644
      }
  
      private void setOffset(float offset)
-@@ -323,7 +618,7 @@ public class SideMenu
+@@ -323,7 +637,7 @@ public class SideMenu
      public void open()
      {
          mOpen = true;
@@ -1922,7 +2389,7 @@ index 155e305..cb15fe3 100644
          mPanel.setVisibility(View.VISIBLE);
          mScrim.setVisibility(View.VISIBLE);
          animateTo(0f);
-@@ -333,8 +628,7 @@ public class SideMenu
+@@ -333,8 +647,7 @@ public class SideMenu
      {
          mOpen = false;
          animateTo(-mPanelWidth);
@@ -1988,10 +2455,10 @@ index 7c821a4..7f546a2 100644
      public static void captureClose() {
          if (mAudioRecord != null) {
 diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
-index 9e37fed..54fec55 100644
+index 9e37fed..fb3cf9a 100644
 --- a/android/app/src/main/res/values/strings.xml
 +++ b/android/app/src/main/res/values/strings.xml
-@@ -1,11 +1,45 @@
+@@ -1,11 +1,46 @@
  <?xml version="1.0" encoding="utf-8"?>
  <resources>
      <!-- Main application name -->
@@ -2004,8 +2471,9 @@ index 9e37fed..54fec55 100644
 -    <string name="export_saves">Export save data</string>
 -    <string name="show_fps">Show FPS counter</string>
 +    <string name="load_archive">Carregar outro pacote (.zip / .obb)</string>
-+    <string name="import_saves">Importar save</string>
-+    <string name="export_saves">Exportar save</string>
++    <string name="import_saves">Importar save ou ZIP</string>
++    <string name="export_saves">Exportar saves em ZIP</string>
++    <string name="export_error_report">Exportar relatório de erro</string>
 +    <string name="show_fps">Mostrar FPS</string>
 +    <string name="settings_title">Configurações</string>
 +    <string name="open_settings">Abrir configurações</string>
