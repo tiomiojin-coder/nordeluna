@@ -1,5 +1,5 @@
 diff --git a/android/app/build.gradle b/android/app/build.gradle
-index 036a159..c51df35 100644
+index 036a159..d12c194 100644
 --- a/android/app/build.gradle
 +++ b/android/app/build.gradle
 @@ -7,12 +7,12 @@ android {
@@ -13,8 +13,8 @@ index 036a159..c51df35 100644
 -        versionCode 1
 -        versionName "0.1.0"
 -        archivesBaseName = "mkxp-z-$versionName"
-+        versionCode 6
-+        versionName "1.3.0"
++        versionCode 7
++        versionName "1.4.0"
 +        archivesBaseName = "Nordeluna-Android-$versionName"
          // Native ABIs are produced by build.sh (see ../build.sh) and placed
          // under src/main/jniLibs/. Everything present there is packaged.
@@ -87,22 +87,60 @@ index a90712f..21d92e7 100644
      </application>
  </manifest>
 diff --git a/android/app/src/main/java/com/mkxpz/MainActivity.java b/android/app/src/main/java/com/mkxpz/MainActivity.java
-index be544a2..4acdf78 100644
+index be544a2..67b6b12 100644
 --- a/android/app/src/main/java/com/mkxpz/MainActivity.java
 +++ b/android/app/src/main/java/com/mkxpz/MainActivity.java
-@@ -65,6 +65,8 @@ public class MainActivity extends SDLActivity
+@@ -3,6 +3,7 @@ package com.mkxpz;
+ import android.annotation.SuppressLint;
+ import android.app.Activity;
+ import android.app.AlarmManager;
++import android.app.AlertDialog;
+ import android.app.PendingIntent;
+ import android.app.ProgressDialog;
+ import android.content.Context;
+@@ -15,7 +16,7 @@ import android.view.KeyEvent;
+ import android.view.MotionEvent;
+ import android.view.ViewGroup.LayoutParams;
+ import android.widget.TextView;
+-import android.widget.LinearLayout;
++import android.widget.RelativeLayout;
+ import android.widget.Toast;
+ import android.graphics.Color;
+ import android.graphics.Typeface;
+@@ -35,6 +36,7 @@ import java.util.ArrayList;
+ import java.util.List;
+ import java.io.File;
+ import java.io.FileInputStream;
++import java.io.FileOutputStream;
+ import java.io.IOException;
+ import java.io.InputStream;
+ import java.nio.charset.StandardCharsets;
+@@ -42,6 +44,7 @@ import java.util.regex.Matcher;
+ import java.util.regex.Pattern;
+ 
+ import org.libsdl.app.SDLActivity;
++import org.libsdl.app.SDLAudioManager;
+ import com.mkxpz.gamepad.Gamepad;
+ import com.mkxpz.gamepad.GamepadConfig;
+ import com.mkxpz.launcher.SideMenu;
+@@ -65,7 +68,12 @@ public class MainActivity extends SDLActivity
  
      private static final String PREFS_NAME = "mkxpz_prefs";
      private static final String PREFS_GAME_PATH = "game_path";
 +    private static final String BUNDLED_GAME_ASSET = "nordeluna-game.zip";
 +    private static final String PREFS_BUNDLED_VERSION = "bundled_game_version";
      private static final String PREFS_FPS_OVERLAY = "fps_overlay_enabled";
++    private static final String PREFS_DISPLAY_MODE = "display_mode";
++    private static final String PREFS_AUDIO_MUTED = "audio_muted";
++    private static final String PREFS_TOUCH_CONTROLS = "touch_controls_enabled";
      private static final int REQUEST_LOAD_ARCHIVE = 200;
      private static final int REQUEST_IMPORT_SAVES = 201;
-@@ -87,11 +89,10 @@ public class MainActivity extends SDLActivity
+     private static final int REQUEST_EXPORT_SAVES = 202;
+@@ -87,15 +95,18 @@ public class MainActivity extends SDLActivity
      // In-screen gamepad
      private final Gamepad mGamepad = new Gamepad();
      private boolean mGamepadInvisible = false;
++    private boolean mTouchControlsEnabled = true;
 +    private boolean mBundledInstallInProgress = false;
  
      // Slide-out launcher menu
@@ -112,7 +150,76 @@ index be544a2..4acdf78 100644
  
      private void runSDLThread()
      {
-@@ -244,9 +245,6 @@ public class MainActivity extends SDLActivity
+         if (!mStarted) {
++            int displayMode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(
++                PREFS_DISPLAY_MODE, SideMenu.DISPLAY_KEEP_ASPECT);
++            applyDisplayModeToGameConfig(displayMode);
+             Log.i(TAG, "Game path: " + GAME_PATH);
+         }
+ 
+@@ -176,6 +187,13 @@ public class MainActivity extends SDLActivity
+         GAME_PATH_DEFAULT = new File(gameRootBase, "mkxp-z").getAbsolutePath();
+         GAME_PATH = GAME_PATH_DEFAULT;
+ 
++        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
++        mTouchControlsEnabled = prefs.getBoolean(PREFS_TOUCH_CONTROLS, true);
++        boolean audioMuted = prefs.getBoolean(PREFS_AUDIO_MUTED, false);
++        int displayMode = prefs.getInt(PREFS_DISPLAY_MODE, SideMenu.DISPLAY_KEEP_ASPECT);
++        SDLAudioManager.setMuted(audioMuted);
++        applySurfaceLayoutMode(displayMode);
++
+         mMainHandler = new Handler(getMainLooper());
+ 
+         mStorageManager = (StorageManager) getSystemService(STORAGE_SERVICE);
+@@ -196,7 +214,7 @@ public class MainActivity extends SDLActivity
+         }
+ 
+         // Setup in-screen gamepad
+-        mGamepadInvisible = (isAndroidTV() || isChromebook());
++        mGamepadInvisible = !mTouchControlsEnabled || isAndroidTV() || isChromebook();
+         GamepadConfig gpadConfig = new GamepadConfig();
+         mGamepad.init(gpadConfig, mGamepadInvisible);
+         mGamepad.setOnKeyDownListener(SDLActivity::onNativeKeyDown);
+@@ -206,7 +224,7 @@ public class MainActivity extends SDLActivity
+             mGamepad.attachTo(this, mLayout);
+         }
+ 
+-        // Setup FPS textview (a high-visibility overlay in the top-left corner).
++        // Setup FPS textview in the upper-right, away from settings and controls.
+         tvFps = new TextView(this);
+         tvFps.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+         tvFps.setTextColor(Color.WHITE);
+@@ -220,14 +238,16 @@ public class MainActivity extends SDLActivity
+         tvFps.setPadding(dpPx(10), dpPx(4), dpPx(10), dpPx(4));
+         tvFps.setVisibility(View.GONE);
+ 
+-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+-        params.setMargins(16, 16, 0, 0);
++        RelativeLayout.LayoutParams params = new RelativeLayout.LayoutParams(
++            LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
++        params.addRule(RelativeLayout.ALIGN_PARENT_END);
++        params.addRule(RelativeLayout.ALIGN_PARENT_TOP);
++        params.setMargins(0, dpPx(8), dpPx(8), 0);
+         tvFps.setLayoutParams(params);
+ 
+         mLayout.addView(tvFps);
+ 
+         // Restore a previously loaded game path (survives process restarts).
+-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+         String savedGamePath = prefs.getString(PREFS_GAME_PATH, null);
+         if (savedGamePath != null && new File(savedGamePath).isDirectory()) {
+             GAME_PATH = savedGamePath;
+@@ -240,13 +260,16 @@ public class MainActivity extends SDLActivity
+         mSideMenu = new SideMenu(this, mLayout);
+         mSideMenu.setGamePath(GAME_PATH);
+         mSideMenu.setFpsOverlayEnabled(fpsOverlayEnabled);
++        mSideMenu.setDisplayMode(displayMode);
++        mSideMenu.setMuted(audioMuted);
++        mSideMenu.setTouchControlsEnabled(mTouchControlsEnabled);
+         mSideMenu.setOnFpsOverlayToggleListener(this::setFpsOverlayEnabled);
++        mSideMenu.setOnDisplayModeChangeListener(this::setDisplayMode);
++        mSideMenu.setOnMuteToggleListener(this::setAudioMuted);
++        mSideMenu.setOnTouchControlsToggleListener(this::setTouchControlsEnabled);
          mSideMenu.setOnLoadArchiveListener(this::pickGameArchive);
          mSideMenu.setOnImportSavesListener(this::pickImportSaves);
          mSideMenu.setOnExportSavesListener(this::pickExportSaves);
@@ -122,7 +229,7 @@ index be544a2..4acdf78 100644
      }
  
      @Override
-@@ -261,16 +259,16 @@ public class MainActivity extends SDLActivity
+@@ -261,16 +284,16 @@ public class MainActivity extends SDLActivity
  
                  // Try to mount main OBB file
                  mStorageManager.mountObb(OBB_MAIN_FILENAME, null, obbListener);
@@ -144,7 +251,7 @@ index be544a2..4acdf78 100644
              }
          } else {
              // onStart: Resume SDL thread
-@@ -315,9 +313,6 @@ public class MainActivity extends SDLActivity
+@@ -315,11 +338,9 @@ public class MainActivity extends SDLActivity
      @Override
      public boolean dispatchTouchEvent(MotionEvent evt)
      {
@@ -152,9 +259,159 @@ index be544a2..4acdf78 100644
 -        handleEdgeSwipe(evt);
 -
          // Show gamepad view on touch when hidden (but not while the menu is open).
-         if ((mSideMenu == null || !mSideMenu.isOpen()) && mGamepadInvisible) {
+-        if ((mSideMenu == null || !mSideMenu.isOpen()) && mGamepadInvisible) {
++        if (mTouchControlsEnabled &&
++                (mSideMenu == null || !mSideMenu.isOpen()) && mGamepadInvisible) {
              mGamepad.showView();
-@@ -681,6 +676,116 @@ public class MainActivity extends SDLActivity
+             mGamepadInvisible = false;
+         }
+@@ -392,6 +413,145 @@ public class MainActivity extends SDLActivity
+             tvFps.setVisibility(View.GONE);
+     }
+ 
++    private void setAudioMuted(boolean muted)
++    {
++        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
++            .edit()
++            .putBoolean(PREFS_AUDIO_MUTED, muted)
++            .apply();
++        SDLAudioManager.setMuted(muted);
++    }
++
++    private void setTouchControlsEnabled(boolean enabled)
++    {
++        mTouchControlsEnabled = enabled;
++        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
++            .edit()
++            .putBoolean(PREFS_TOUCH_CONTROLS, enabled)
++            .apply();
++
++        if (enabled) {
++            mGamepad.showView();
++            mGamepadInvisible = false;
++        } else {
++            mGamepad.hideView();
++            mGamepadInvisible = true;
++        }
++    }
++
++    private void setDisplayMode(int mode)
++    {
++        if (mode < SideMenu.DISPLAY_KEEP_ASPECT || mode > SideMenu.DISPLAY_ORIGINAL_SIZE)
++            mode = SideMenu.DISPLAY_KEEP_ASPECT;
++
++        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
++        int currentMode = prefs.getInt(PREFS_DISPLAY_MODE, SideMenu.DISPLAY_KEEP_ASPECT);
++        if (currentMode == mode)
++            return;
++
++        final int requestedMode = mode;
++        if (mStarted) {
++            new AlertDialog.Builder(this)
++                .setTitle(R.string.display_restart_title)
++                .setMessage(R.string.display_restart_message)
++                .setPositiveButton(R.string.apply_and_restart, (dialog, which) ->
++                    applyDisplayModeSelection(requestedMode, true))
++                .setNegativeButton(android.R.string.cancel, (dialog, which) ->
++                    mSideMenu.setDisplayMode(currentMode))
++                .setOnCancelListener(dialog -> mSideMenu.setDisplayMode(currentMode))
++                .show();
++        } else {
++            applyDisplayModeSelection(requestedMode, false);
++        }
++    }
++
++    private void applyDisplayModeSelection(int mode, boolean restart)
++    {
++        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
++        int previousMode = prefs.getInt(PREFS_DISPLAY_MODE, SideMenu.DISPLAY_KEEP_ASPECT);
++
++        if (!applyDisplayModeToGameConfig(mode)) {
++            mSideMenu.setDisplayMode(previousMode);
++            Toast.makeText(this, R.string.display_apply_failed, Toast.LENGTH_LONG).show();
++            return;
++        }
++
++        prefs.edit().putInt(PREFS_DISPLAY_MODE, mode).apply();
++
++        if (restart) {
++            mSideMenu.close();
++            Toast.makeText(this, R.string.display_restarting, Toast.LENGTH_SHORT).show();
++            mMainHandler.postDelayed(this::restartApp, 450);
++        }
++    }
++
++    private boolean applyDisplayModeToGameConfig(int mode)
++    {
++        File configFile = new File(GAME_PATH, "mkxp.json");
++        if (!configFile.isFile())
++            return false;
++
++        StringBuilder sb = new StringBuilder();
++        try (FileInputStream in = new FileInputStream(configFile)) {
++            byte[] buffer = new byte[4096];
++            int count;
++            while ((count = in.read(buffer)) > 0)
++                sb.append(new String(buffer, 0, count, StandardCharsets.UTF_8));
++        } catch (IOException e) {
++            Log.e(TAG, "Could not read display configuration", e);
++            return false;
++        }
++
++        boolean keepAspect = mode != SideMenu.DISPLAY_FILL_SCREEN;
++        String json = setJsonBoolean(sb.toString(), "fixedAspectRatio", keepAspect);
++        json = setJsonBoolean(json, "integerScalingActive", false);
++        json = setJsonBoolean(json, "integerScalingLastMile", true);
++
++        try (FileOutputStream out = new FileOutputStream(configFile, false)) {
++            out.write(json.getBytes(StandardCharsets.UTF_8));
++            return true;
++        } catch (IOException e) {
++            Log.e(TAG, "Could not write display configuration", e);
++            return false;
++        }
++    }
++
++    private static String setJsonBoolean(String json, String key, boolean value)
++    {
++        Pattern pattern = Pattern.compile("(?m)^(\\s*\\\"" + Pattern.quote(key) +
++            "\\\"\\s*:\\s*)(true|false)");
++        Matcher matcher = pattern.matcher(json);
++        if (matcher.find())
++            return matcher.replaceFirst(Matcher.quoteReplacement(
++                matcher.group(1) + Boolean.toString(value)));
++
++        int closingBrace = json.lastIndexOf('}');
++        if (closingBrace < 0)
++            return json;
++
++        int previous = closingBrace - 1;
++        while (previous >= 0 && Character.isWhitespace(json.charAt(previous)))
++            previous--;
++        String comma = previous >= 0 && json.charAt(previous) != '{' ? "," : "";
++        return json.substring(0, closingBrace) + comma + "\n  \"" + key +
++            "\": " + value + "\n" + json.substring(closingBrace);
++    }
++
++    private void applySurfaceLayoutMode(int mode)
++    {
++        RelativeLayout.LayoutParams surfaceParams;
++        if (mode == SideMenu.DISPLAY_ORIGINAL_SIZE) {
++            // Nordeluna renders at 512x384. These are physical pixels on
++            // purpose: this option provides a true 1:1 game image.
++            surfaceParams = new RelativeLayout.LayoutParams(512, 384);
++            surfaceParams.addRule(RelativeLayout.CENTER_IN_PARENT);
++        } else {
++            surfaceParams = new RelativeLayout.LayoutParams(
++                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
++        }
++        mSurface.setLayoutParams(surfaceParams);
++    }
++
+     /**
+      * This static method is used in native mkxp-z. (see systemImpl.cpp)
+      * This method returns a string of current device locale tag. (e.g. "en_US")
+@@ -681,6 +841,116 @@ public class MainActivity extends SDLActivity
          }).start();
      }
  
@@ -271,7 +528,7 @@ index be544a2..4acdf78 100644
      /**
       * Searches for the directory that actually contains a game, starting from
       * {@code root} and descending into its subdirectories.
-@@ -810,33 +915,4 @@ public class MainActivity extends SDLActivity
+@@ -810,33 +1080,4 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
@@ -306,10 +563,10 @@ index be544a2..4acdf78 100644
 -    }
  }
 diff --git a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
-index 155e305..732e883 100644
+index 155e305..9a19401 100644
 --- a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
 +++ b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
-@@ -4,14 +4,14 @@ import android.content.Context;
+@@ -4,14 +4,16 @@ import android.content.Context;
  import android.graphics.Color;
  import android.graphics.Typeface;
  import android.graphics.drawable.GradientDrawable;
@@ -321,12 +578,14 @@ index 155e305..732e883 100644
  import android.view.animation.DecelerateInterpolator;
  import android.widget.Button;
  import android.widget.LinearLayout;
++import android.widget.RadioButton;
++import android.widget.RadioGroup;
  import android.widget.RelativeLayout;
 +import android.widget.ScrollView;
  import android.widget.Switch;
  import android.widget.TextView;
  
-@@ -22,9 +22,9 @@ import com.mkxpz.R;
+@@ -22,12 +24,16 @@ import com.mkxpz.R;
   *
   * <p>The menu is kept as a set of sibling views added to the activity's
   * content {@link RelativeLayout}, so it does not require restructuring the
@@ -339,7 +598,34 @@ index 155e305..732e883 100644
   */
  public class SideMenu
  {
-@@ -53,13 +53,11 @@ public class SideMenu
++    public static final int DISPLAY_KEEP_ASPECT = 0;
++    public static final int DISPLAY_FILL_SCREEN = 1;
++    public static final int DISPLAY_ORIGINAL_SIZE = 2;
++
+     public interface OnLoadArchiveListener
+     {
+         void onLoadArchive();
+@@ -48,43 +54,58 @@ public class SideMenu
+         void onFpsOverlayToggle(boolean enabled);
+     }
+ 
++    public interface OnDisplayModeChangeListener
++    {
++        void onDisplayModeChange(int mode);
++    }
++
++    public interface OnMuteToggleListener
++    {
++        void onMuteToggle(boolean muted);
++    }
++
++    public interface OnTouchControlsToggleListener
++    {
++        void onTouchControlsToggle(boolean enabled);
++    }
++
+     private final Context mContext;
+     private final ViewGroup mRoot;
  
      private View mScrim;
      private LinearLayout mPanel;
@@ -347,6 +633,12 @@ index 155e305..732e883 100644
 +    private TextView mConfigButton;
      private TextView mGamePathView;
      private Switch mFpsToggle;
++    private Switch mMuteToggle;
++    private Switch mTouchControlsToggle;
++    private RadioGroup mDisplayModeGroup;
++    private RadioButton mKeepAspectOption;
++    private RadioButton mFillScreenOption;
++    private RadioButton mIntegerSizeOption;
  
      private final int mPanelWidth;
 -    private final int mHandleWidth;
@@ -354,8 +646,12 @@ index 155e305..732e883 100644
  
      private OnLoadArchiveListener mOnLoadArchiveListener = () -> {};
  
-@@ -68,23 +66,16 @@ public class SideMenu
+     private OnImportSavesListener mOnImportSavesListener = () -> {};
+     private OnExportSavesListener mOnExportSavesListener = () -> {};
      private OnFpsOverlayToggleListener mOnFpsOverlayToggleListener = enabled -> {};
++    private OnDisplayModeChangeListener mOnDisplayModeChangeListener = mode -> {};
++    private OnMuteToggleListener mOnMuteToggleListener = muted -> {};
++    private OnTouchControlsToggleListener mOnTouchControlsToggleListener = enabled -> {};
  
      private boolean mOpen = false;
 -    private boolean mDidDrag = false;
@@ -380,7 +676,60 @@ index 155e305..732e883 100644
  
          build();
          setOffset(-mPanelWidth);
-@@ -142,25 +133,40 @@ public class SideMenu
+@@ -110,12 +131,52 @@ public class SideMenu
+         mOnFpsOverlayToggleListener = listener;
+     }
+ 
++    public void setOnDisplayModeChangeListener(OnDisplayModeChangeListener listener)
++    {
++        mOnDisplayModeChangeListener = listener;
++    }
++
++    public void setOnMuteToggleListener(OnMuteToggleListener listener)
++    {
++        mOnMuteToggleListener = listener;
++    }
++
++    public void setOnTouchControlsToggleListener(OnTouchControlsToggleListener listener)
++    {
++        mOnTouchControlsToggleListener = listener;
++    }
++
+     public void setFpsOverlayEnabled(boolean enabled)
+     {
+         if (mFpsToggle != null)
+             mFpsToggle.setChecked(enabled);
+     }
+ 
++    public void setMuted(boolean muted)
++    {
++        if (mMuteToggle != null)
++            mMuteToggle.setChecked(muted);
++    }
++
++    public void setTouchControlsEnabled(boolean enabled)
++    {
++        if (mTouchControlsToggle != null)
++            mTouchControlsToggle.setChecked(enabled);
++    }
++
++    public void setDisplayMode(int mode)
++    {
++        if (mDisplayModeGroup == null)
++            return;
++
++        if (mode == DISPLAY_FILL_SCREEN)
++            mFillScreenOption.setChecked(true);
++        else if (mode == DISPLAY_ORIGINAL_SIZE)
++            mIntegerSizeOption.setChecked(true);
++        else
++            mKeepAspectOption.setChecked(true);
++    }
++
+     public void setGamePath(String path)
+     {
+         if (mGamePathView != null)
+@@ -142,25 +203,40 @@ public class SideMenu
          mPanel = new LinearLayout(mContext);
          mPanel.setOrientation(LinearLayout.VERTICAL);
          mPanel.setBackgroundColor(Color.rgb(22, 22, 22));
@@ -425,16 +774,56 @@ index 155e305..732e883 100644
  
          Button loadArchive = new Button(mContext);
          loadArchive.setText(R.string.load_archive);
-@@ -173,7 +179,7 @@ public class SideMenu
+@@ -173,7 +249,47 @@ public class SideMenu
              close();
              mOnLoadArchiveListener.onLoadArchive();
          });
 -        mPanel.addView(loadArchive);
 +        content.addView(loadArchive);
++
++        addSectionHeader(content, R.string.section_screen);
++
++        mDisplayModeGroup = new RadioGroup(mContext);
++        mDisplayModeGroup.setOrientation(RadioGroup.VERTICAL);
++
++        mKeepAspectOption = makeRadioButton(R.string.display_keep_aspect);
++        mFillScreenOption = makeRadioButton(R.string.display_fill_screen);
++        mIntegerSizeOption = makeRadioButton(R.string.display_integer_size);
++        mDisplayModeGroup.addView(mKeepAspectOption);
++        mDisplayModeGroup.addView(mFillScreenOption);
++        mDisplayModeGroup.addView(mIntegerSizeOption);
++        mDisplayModeGroup.setOnCheckedChangeListener((group, checkedId) -> {
++            if (checkedId == mFillScreenOption.getId())
++                mOnDisplayModeChangeListener.onDisplayModeChange(DISPLAY_FILL_SCREEN);
++            else if (checkedId == mIntegerSizeOption.getId())
++                mOnDisplayModeChangeListener.onDisplayModeChange(DISPLAY_ORIGINAL_SIZE);
++            else if (checkedId == mKeepAspectOption.getId())
++                mOnDisplayModeChangeListener.onDisplayModeChange(DISPLAY_KEEP_ASPECT);
++        });
++        content.addView(mDisplayModeGroup);
++
++        TextView displayHint = makeHint(R.string.display_restart_hint);
++        content.addView(displayHint);
++
++        addSectionHeader(content, R.string.section_controls);
++
++        mTouchControlsToggle = makeSwitch(R.string.show_touch_controls);
++        mTouchControlsToggle.setOnCheckedChangeListener((buttonView, isChecked) ->
++            mOnTouchControlsToggleListener.onTouchControlsToggle(isChecked));
++        content.addView(mTouchControlsToggle);
++
++        addSectionHeader(content, R.string.section_audio);
++
++        mMuteToggle = makeSwitch(R.string.mute_audio);
++        mMuteToggle.setOnCheckedChangeListener((buttonView, isChecked) ->
++            mOnMuteToggleListener.onMuteToggle(isChecked));
++        content.addView(mMuteToggle);
++
++        addSectionHeader(content, R.string.section_saves);
  
          Button importSaves = new Button(mContext);
          importSaves.setText(R.string.import_saves);
-@@ -186,7 +192,7 @@ public class SideMenu
+@@ -186,7 +302,7 @@ public class SideMenu
              close();
              mOnImportSavesListener.onImportSaves();
          });
@@ -443,17 +832,23 @@ index 155e305..732e883 100644
  
          Button exportSaves = new Button(mContext);
          exportSaves.setText(R.string.export_saves);
-@@ -199,7 +205,7 @@ public class SideMenu
+@@ -199,112 +315,92 @@ public class SideMenu
              close();
              mOnExportSavesListener.onExportSaves();
          });
 -        mPanel.addView(exportSaves);
 +        content.addView(exportSaves);
  
-         mFpsToggle = new Switch(mContext);
-         mFpsToggle.setText(R.string.show_fps);
-@@ -210,103 +216,39 @@ public class SideMenu
-         mFpsToggle.setLayoutParams(fpsLp);
+-        mFpsToggle = new Switch(mContext);
+-        mFpsToggle.setText(R.string.show_fps);
+-        mFpsToggle.setTextColor(Color.WHITE);
+-        LinearLayout.LayoutParams fpsLp = new LinearLayout.LayoutParams(
+-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+-        fpsLp.setMargins(0, dp(24), 0, 0);
+-        mFpsToggle.setLayoutParams(fpsLp);
++        addSectionHeader(content, R.string.section_performance);
++
++        mFpsToggle = makeSwitch(R.string.show_fps);
          mFpsToggle.setOnCheckedChangeListener((buttonView, isChecked) ->
              mOnFpsOverlayToggleListener.onFpsOverlayToggle(isChecked));
 -        mPanel.addView(mFpsToggle);
@@ -496,15 +891,23 @@ index 155e305..732e883 100644
      }
  
 -    private GradientDrawable makeHandleDrawable()
-+    private GradientDrawable makeConfigButtonDrawable()
++    private void addSectionHeader(LinearLayout content, int textResource)
      {
-         GradientDrawable d = new GradientDrawable();
+-        GradientDrawable d = new GradientDrawable();
 -        d.setColor(0x33202020);
 -        d.setCornerRadius(dp(7));
-+        d.setColor(0xCC202020);
-+        d.setStroke(dp(1), 0x88FFFFFF);
-+        d.setCornerRadius(dp(22));
-         return d;
+-        return d;
++        TextView header = new TextView(mContext);
++        header.setText(textResource);
++        header.setTextColor(0xFF80CBC4);
++        header.setTextSize(14f);
++        header.setTypeface(null, Typeface.BOLD);
++        header.setAllCaps(true);
++        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
++            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++        lp.setMargins(0, dp(24), 0, dp(8));
++        header.setLayoutParams(lp);
++        content.addView(header);
      }
  
 -    /**
@@ -512,22 +915,49 @@ index 155e305..732e883 100644
 -     * out again after {@link #HANDLE_REVEAL_DURATION_MS}.
 -     */
 -    public void revealHandle()
--    {
++    private RadioButton makeRadioButton(int textResource)
+     {
 -        if (mHandle == null)
 -            return;
--
++        RadioButton option = new RadioButton(mContext);
++        option.setId(View.generateViewId());
++        option.setText(textResource);
++        option.setTextColor(Color.WHITE);
++        option.setTextSize(15f);
++        option.setMinHeight(dp(44));
++        return option;
++    }
+ 
 -        mHandle.removeCallbacks(mHideHandleRunnable);
 -        mHandle.animate().cancel();
 -        mHandle.setVisibility(View.VISIBLE);
 -        mHandle.setAlpha(1f);
 -        mHandle.postDelayed(mHideHandleRunnable, HANDLE_REVEAL_DURATION_MS);
--    }
--
++    private Switch makeSwitch(int textResource)
++    {
++        Switch toggle = new Switch(mContext);
++        toggle.setText(textResource);
++        toggle.setTextColor(Color.WHITE);
++        toggle.setTextSize(15f);
++        toggle.setMinHeight(dp(48));
++        toggle.setLayoutParams(new LinearLayout.LayoutParams(
++            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
++        return toggle;
+     }
+ 
 -    private void hideHandle()
--    {
++    private TextView makeHint(int textResource)
+     {
 -        if (mHandle == null)
 -            return;
--
++        TextView hint = new TextView(mContext);
++        hint.setText(textResource);
++        hint.setTextColor(0xAFFFFFFF);
++        hint.setTextSize(12f);
++        hint.setPadding(dp(4), dp(4), dp(4), 0);
++        return hint;
++    }
+ 
 -        mHandle.animate()
 -            .alpha(0f)
 -            .setDuration(300)
@@ -577,12 +1007,17 @@ index 155e305..732e883 100644
 -    private float clamp(float value, float min, float max)
 -    {
 -        return Math.max(min, Math.min(max, value));
--    }
--
++    private GradientDrawable makeConfigButtonDrawable()
++    {
++        GradientDrawable d = new GradientDrawable();
++        d.setColor(0xCC202020);
++        d.setStroke(dp(1), 0x88FFFFFF);
++        d.setCornerRadius(dp(22));
++        return d;
+     }
+ 
      private void setOffset(float offset)
-     {
-         mOffset = offset;
-@@ -323,7 +265,7 @@ public class SideMenu
+@@ -323,7 +419,7 @@ public class SideMenu
      public void open()
      {
          mOpen = true;
@@ -591,7 +1026,7 @@ index 155e305..732e883 100644
          mPanel.setVisibility(View.VISIBLE);
          mScrim.setVisibility(View.VISIBLE);
          animateTo(0f);
-@@ -333,8 +275,7 @@ public class SideMenu
+@@ -333,8 +429,7 @@ public class SideMenu
      {
          mOpen = false;
          animateTo(-mPanelWidth);
@@ -601,11 +1036,47 @@ index 155e305..732e883 100644
      }
  
      public void toggle()
+diff --git a/android/app/src/main/java/org/libsdl/app/SDLAudioManager.java b/android/app/src/main/java/org/libsdl/app/SDLAudioManager.java
+index 7c821a4..56bad33 100644
+--- a/android/app/src/main/java/org/libsdl/app/SDLAudioManager.java
++++ b/android/app/src/main/java/org/libsdl/app/SDLAudioManager.java
+@@ -19,6 +19,7 @@ public class SDLAudioManager {
+     protected static AudioTrack mAudioTrack;
+     protected static AudioRecord mAudioRecord;
+     protected static Context mContext;
++    private static volatile boolean mMuted;
+ 
+     private static final int[] NO_DEVICES = {};
+ 
+@@ -269,6 +270,7 @@ public class SDLAudioManager {
+                 }
+ 
+                 mAudioTrack.play();
++                mAudioTrack.setVolume(mMuted ? 0.0f : 1.0f);
+             }
+ 
+             results[0] = mAudioTrack.getSampleRate();
+@@ -477,6 +479,15 @@ public class SDLAudioManager {
+         }
+     }
+ 
++    /** Mutes only this application's SDL playback without changing system volume. */
++    public static void setMuted(boolean muted) {
++        mMuted = muted;
++        AudioTrack track = mAudioTrack;
++        if (track != null) {
++            track.setVolume(muted ? 0.0f : 1.0f);
++        }
++    }
++
+     /** This method is called by SDL using JNI. */
+     public static void captureClose() {
+         if (mAudioRecord != null) {
 diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
-index 9e37fed..8789abd 100644
+index 9e37fed..c559fb5 100644
 --- a/android/app/src/main/res/values/strings.xml
 +++ b/android/app/src/main/res/values/strings.xml
-@@ -1,11 +1,13 @@
+@@ -1,11 +1,29 @@
  <?xml version="1.0" encoding="utf-8"?>
  <resources>
      <!-- Main application name -->
@@ -623,4 +1094,20 @@ index 9e37fed..8789abd 100644
 +    <string name="show_fps">Mostrar FPS</string>
 +    <string name="settings_title">Configurações</string>
 +    <string name="open_settings">Abrir configurações</string>
++    <string name="section_screen">Tela</string>
++    <string name="section_controls">Controles</string>
++    <string name="section_audio">Áudio</string>
++    <string name="section_saves">Saves</string>
++    <string name="section_performance">Desempenho</string>
++    <string name="display_keep_aspect">Manter proporção</string>
++    <string name="display_fill_screen">Preencher tela</string>
++    <string name="display_integer_size">Tamanho original</string>
++    <string name="display_restart_hint">A troca do modo de tela exige reiniciar o jogo.</string>
++    <string name="display_restart_title">Reiniciar o jogo?</string>
++    <string name="display_restart_message">Salve seu progresso antes de continuar. O jogo será reiniciado para aplicar o novo modo de tela.</string>
++    <string name="apply_and_restart">Aplicar e reiniciar</string>
++    <string name="display_restarting">Aplicando modo de tela…</string>
++    <string name="display_apply_failed">Não foi possível aplicar o modo de tela.</string>
++    <string name="show_touch_controls">Mostrar controles na tela</string>
++    <string name="mute_audio">Silenciar jogo</string>
  </resources>
