@@ -87,7 +87,7 @@ index a90712f..21d92e7 100644
      </application>
  </manifest>
 diff --git a/android/app/src/main/java/com/mkxpz/MainActivity.java b/android/app/src/main/java/com/mkxpz/MainActivity.java
-index be544a2..c21ee77 100644
+index be544a2..5177de0 100644
 --- a/android/app/src/main/java/com/mkxpz/MainActivity.java
 +++ b/android/app/src/main/java/com/mkxpz/MainActivity.java
 @@ -3,6 +3,7 @@ package com.mkxpz;
@@ -144,7 +144,7 @@ index be544a2..c21ee77 100644
  import com.mkxpz.gamepad.Gamepad;
  import com.mkxpz.gamepad.GamepadConfig;
  import com.mkxpz.launcher.SideMenu;
-@@ -65,7 +75,15 @@ public class MainActivity extends SDLActivity
+@@ -65,7 +75,16 @@ public class MainActivity extends SDLActivity
  
      private static final String PREFS_NAME = "mkxpz_prefs";
      private static final String PREFS_GAME_PATH = "game_path";
@@ -154,13 +154,14 @@ index be544a2..c21ee77 100644
 +    private static final String PREFS_DISPLAY_MODE = "display_mode";
 +    private static final String PREFS_AUDIO_MUTED = "audio_muted";
 +    private static final String PREFS_TOUCH_CONTROLS = "touch_controls_enabled";
++    private static final String PREFS_CONTROL_HAPTICS = "control_haptics_enabled";
 +    private static final String PREFS_GAME_AREA_SCALE = "game_area_scale";
 +    private static final String PREFS_GRAPHICS_FILTER = "graphics_filter";
 +    private static final String PREFS_WHATS_NEW_VERSION = "whats_new_version";
      private static final int REQUEST_LOAD_ARCHIVE = 200;
      private static final int REQUEST_IMPORT_SAVES = 201;
      private static final int REQUEST_EXPORT_SAVES = 202;
-@@ -87,19 +105,62 @@ public class MainActivity extends SDLActivity
+@@ -87,19 +106,62 @@ public class MainActivity extends SDLActivity
      // In-screen gamepad
      private final Gamepad mGamepad = new Gamepad();
      private boolean mGamepadInvisible = false;
@@ -225,13 +226,14 @@ index be544a2..c21ee77 100644
  
          // Run (resume) native SDL thread
          if (mHasMultiWindow) {
-@@ -176,8 +237,25 @@ public class MainActivity extends SDLActivity
+@@ -176,8 +238,26 @@ public class MainActivity extends SDLActivity
          GAME_PATH_DEFAULT = new File(gameRootBase, "mkxp-z").getAbsolutePath();
          GAME_PATH = GAME_PATH_DEFAULT;
  
 +        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 +        mTouchControlsEnabled = prefs.getBoolean(PREFS_TOUCH_CONTROLS, true);
 +        boolean audioMuted = prefs.getBoolean(PREFS_AUDIO_MUTED, false);
++        boolean controlHaptics = prefs.getBoolean(PREFS_CONTROL_HAPTICS, true);
 +        int displayMode = prefs.getInt(PREFS_DISPLAY_MODE, SideMenu.DISPLAY_KEEP_ASPECT);
 +        int gameAreaScale = prefs.getInt(
 +            PREFS_GAME_AREA_SCALE, SideMenu.DEFAULT_GAME_AREA_SCALE);
@@ -251,7 +253,7 @@ index be544a2..c21ee77 100644
          mStorageManager = (StorageManager) getSystemService(STORAGE_SERVICE);
          mVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
  
-@@ -196,7 +274,7 @@ public class MainActivity extends SDLActivity
+@@ -196,9 +276,10 @@ public class MainActivity extends SDLActivity
          }
  
          // Setup in-screen gamepad
@@ -259,8 +261,11 @@ index be544a2..c21ee77 100644
 +        mGamepadInvisible = !mTouchControlsEnabled || isAndroidTV() || isChromebook();
          GamepadConfig gpadConfig = new GamepadConfig();
          mGamepad.init(gpadConfig, mGamepadInvisible);
++        mGamepad.setHapticsEnabled(controlHaptics);
          mGamepad.setOnKeyDownListener(SDLActivity::onNativeKeyDown);
-@@ -206,7 +284,7 @@ public class MainActivity extends SDLActivity
+         mGamepad.setOnKeyUpListener(SDLActivity::onNativeKeyUp);
+ 
+@@ -206,7 +287,7 @@ public class MainActivity extends SDLActivity
              mGamepad.attachTo(this, mLayout);
          }
  
@@ -269,7 +274,7 @@ index be544a2..c21ee77 100644
          tvFps = new TextView(this);
          tvFps.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
          tvFps.setTextColor(Color.WHITE);
-@@ -220,14 +298,16 @@ public class MainActivity extends SDLActivity
+@@ -220,14 +301,16 @@ public class MainActivity extends SDLActivity
          tvFps.setPadding(dpPx(10), dpPx(4), dpPx(10), dpPx(4));
          tvFps.setVisibility(View.GONE);
  
@@ -289,7 +294,7 @@ index be544a2..c21ee77 100644
          String savedGamePath = prefs.getString(PREFS_GAME_PATH, null);
          if (savedGamePath != null && new File(savedGamePath).isDirectory()) {
              GAME_PATH = savedGamePath;
-@@ -240,13 +320,20 @@ public class MainActivity extends SDLActivity
+@@ -240,13 +323,23 @@ public class MainActivity extends SDLActivity
          mSideMenu = new SideMenu(this, mLayout);
          mSideMenu.setGamePath(GAME_PATH);
          mSideMenu.setFpsOverlayEnabled(fpsOverlayEnabled);
@@ -298,12 +303,15 @@ index be544a2..c21ee77 100644
 +        mSideMenu.setGraphicsFilter(graphicsFilter);
 +        mSideMenu.setMuted(audioMuted);
 +        mSideMenu.setTouchControlsEnabled(mTouchControlsEnabled);
++        mSideMenu.setHapticsEnabled(controlHaptics);
          mSideMenu.setOnFpsOverlayToggleListener(this::setFpsOverlayEnabled);
 +        mSideMenu.setOnDisplayModeChangeListener(this::setDisplayMode);
 +        mSideMenu.setOnGameAreaScaleChangeListener(this::setGameAreaScale);
 +        mSideMenu.setOnGraphicsFilterChangeListener(this::setGraphicsFilter);
 +        mSideMenu.setOnMuteToggleListener(this::setAudioMuted);
 +        mSideMenu.setOnTouchControlsToggleListener(this::setTouchControlsEnabled);
++        mSideMenu.setOnEditControlsListener(mGamepad::startLayoutEditor);
++        mSideMenu.setOnHapticsToggleListener(this::setControlHapticsEnabled);
          mSideMenu.setOnLoadArchiveListener(this::pickGameArchive);
          mSideMenu.setOnImportSavesListener(this::pickImportSaves);
          mSideMenu.setOnExportSavesListener(this::pickExportSaves);
@@ -313,7 +321,7 @@ index be544a2..c21ee77 100644
      }
  
      @Override
-@@ -261,16 +348,16 @@ public class MainActivity extends SDLActivity
+@@ -261,16 +354,16 @@ public class MainActivity extends SDLActivity
  
                  // Try to mount main OBB file
                  mStorageManager.mountObb(OBB_MAIN_FILENAME, null, obbListener);
@@ -335,7 +343,7 @@ index be544a2..c21ee77 100644
              }
          } else {
              // onStart: Resume SDL thread
-@@ -278,9 +365,33 @@ public class MainActivity extends SDLActivity
+@@ -278,9 +371,33 @@ public class MainActivity extends SDLActivity
          }
      }
  
@@ -369,7 +377,7 @@ index be544a2..c21ee77 100644
          super.onDestroy();
  
          // HACK: Exiting the JVM (process) since Ruby does not like when we
-@@ -289,6 +400,83 @@ public class MainActivity extends SDLActivity
+@@ -289,6 +406,83 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
@@ -453,7 +461,7 @@ index be544a2..c21ee77 100644
      @Override
      public boolean dispatchKeyEvent(KeyEvent evt)
      {
-@@ -315,11 +503,9 @@ public class MainActivity extends SDLActivity
+@@ -315,11 +509,9 @@ public class MainActivity extends SDLActivity
      @Override
      public boolean dispatchTouchEvent(MotionEvent evt)
      {
@@ -467,7 +475,7 @@ index be544a2..c21ee77 100644
              mGamepad.showView();
              mGamepadInvisible = false;
          }
-@@ -392,6 +578,318 @@ public class MainActivity extends SDLActivity
+@@ -392,6 +584,327 @@ public class MainActivity extends SDLActivity
              tvFps.setVisibility(View.GONE);
      }
  
@@ -495,6 +503,15 @@ index be544a2..c21ee77 100644
 +            mGamepad.hideView();
 +            mGamepadInvisible = true;
 +        }
++    }
++
++    private void setControlHapticsEnabled(boolean enabled)
++    {
++        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
++            .edit()
++            .putBoolean(PREFS_CONTROL_HAPTICS, enabled)
++            .apply();
++        mGamepad.setHapticsEnabled(enabled);
 +    }
 +
 +    private void setDisplayMode(int mode)
@@ -786,7 +803,7 @@ index be544a2..c21ee77 100644
      /**
       * This static method is used in native mkxp-z. (see systemImpl.cpp)
       * This method returns a string of current device locale tag. (e.g. "en_US")
-@@ -681,6 +1179,116 @@ public class MainActivity extends SDLActivity
+@@ -681,6 +1194,116 @@ public class MainActivity extends SDLActivity
          }).start();
      }
  
@@ -903,7 +920,7 @@ index be544a2..c21ee77 100644
      /**
       * Searches for the directory that actually contains a game, starting from
       * {@code root} and descending into its subdirectories.
-@@ -810,33 +1418,4 @@ public class MainActivity extends SDLActivity
+@@ -810,33 +1433,4 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
@@ -937,8 +954,321 @@ index be544a2..c21ee77 100644
 -        }
 -    }
  }
+diff --git a/android/app/src/main/java/com/mkxpz/gamepad/Gamepad.java b/android/app/src/main/java/com/mkxpz/gamepad/Gamepad.java
+index 0e8b645..abb2adf 100644
+--- a/android/app/src/main/java/com/mkxpz/gamepad/Gamepad.java
++++ b/android/app/src/main/java/com/mkxpz/gamepad/Gamepad.java
+@@ -2,6 +2,14 @@ package com.mkxpz.gamepad;
+ 
+ import android.annotation.SuppressLint;
+ import android.content.Context;
++import android.content.SharedPreferences;
++import android.graphics.Color;
++import android.graphics.drawable.GradientDrawable;
++import android.os.Build;
++import android.os.VibrationEffect;
++import android.os.Vibrator;
++import android.view.Gravity;
++import android.view.View;
+ import android.view.ViewGroup;
+ import android.view.LayoutInflater;
+ import android.view.InputDevice;
+@@ -9,6 +17,9 @@ import android.view.KeyEvent;
+ import android.view.MotionEvent;
+ import android.view.animation.AlphaAnimation;
+ import android.widget.RelativeLayout;
++import android.widget.Button;
++import android.widget.LinearLayout;
++import android.widget.TextView;
+ 
+ import com.mkxpz.R;
+ import com.mkxpz.utils.ViewUtils;
+@@ -17,6 +28,23 @@ public class Gamepad
+ {
+     private GamepadConfig mGamepadConfig = null;
+     private boolean mInvisible = false;
++    private Context mContext;
++    private ViewGroup mHost;
++    private SharedPreferences mPreferences;
++    private Vibrator mVibrator;
++    private boolean mHapticsEnabled = true;
++    private boolean mEditing;
++    private View mSelectedControl;
++    private LinearLayout mEditorBar;
++    private TextView mEditorStatus;
++    private float mDragStartRawX;
++    private float mDragStartRawY;
++    private float mDragStartTranslationX;
++    private float mDragStartTranslationY;
++    private final java.util.LinkedHashMap<String, View> mEditableControls =
++        new java.util.LinkedHashMap<>();
++
++    private static final String PREFS_NAME = "nordeluna_control_layout";
+ 
+     private OnKeyDownListener mOnKeyDownListener = key -> {};
+     private OnKeyUpListener mOnKeyUpListener = key -> {};
+@@ -65,6 +93,10 @@ public class Gamepad
+     @SuppressLint("ClickableViewAccessibility")
+     public void attachTo(Context context, ViewGroup viewGroup)
+     {
++        mContext = context;
++        mHost = viewGroup;
++        mPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
++        mVibrator = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
+         // Setup layout of in-screen gamepad
+         LayoutInflater inflater = (LayoutInflater) context.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+         ViewGroup layout = (ViewGroup) inflater.inflate(R.layout.gamepad_layout, viewGroup);
+@@ -90,7 +122,10 @@ public class Gamepad
+ 
+         // Setup in-screen gamepad listeners
+         mGamepadLayout.setOnTouchListener((view, motionEvent) -> false);
+-        gpadDPad.setOnKeyDownListener(key -> mOnKeyDownListener.onKeyDown(key));
++        gpadDPad.setOnKeyDownListener(key -> {
++            performHaptic(8);
++            mOnKeyDownListener.onKeyDown(key);
++        });
+         gpadDPad.setOnKeyUpListener(key -> mOnKeyUpListener.onKeyUp(key));
+ 
+         // Configure gamepad
+@@ -99,6 +134,20 @@ public class Gamepad
+         // Setup buttons for gamepad
+         initGamepadButtons();
+ 
++        registerEditableControl("Direcional", gpadDPad);
++        registerEditableControl("A", gpadBtnA);
++        registerEditableControl("B", gpadBtnB);
++        registerEditableControl("C", gpadBtnC);
++        registerEditableControl("X", gpadBtnX);
++        registerEditableControl("Y", gpadBtnY);
++        registerEditableControl("Z", gpadBtnZ);
++        registerEditableControl("L", gpadBtnL);
++        registerEditableControl("R", gpadBtnR);
++        registerEditableControl("CTRL", gpadBtnCTRL);
++        registerEditableControl("ALT", gpadBtnALT);
++        registerEditableControl("SHIFT", gpadBtnSHIFT);
++        disableParentClipping(mGamepadLayout);
++
+         // Apply scale and opacity from gamepad config
+         ViewUtils.resize(mGamepadLayout, mGamepadConfig.scale);
+         ViewUtils.changeOpacity(mGamepadLayout, mGamepadConfig.opacity);
+@@ -115,10 +164,207 @@ public class Gamepad
+         // Set gamepad button
+         gpadBtn.setForegroundText(btnLabel);
+         gpadBtn.setKey(keycode);
+-        gpadBtn.setOnKeyDownListener(key -> mOnKeyDownListener.onKeyDown(key));
++        gpadBtn.setOnKeyDownListener(key -> {
++            performHaptic(key == KeyEvent.KEYCODE_C ? 28 : 12);
++            mOnKeyDownListener.onKeyDown(key);
++        });
+         gpadBtn.setOnKeyUpListener(key -> mOnKeyUpListener.onKeyUp(key));
+     }
+ 
++    public void setHapticsEnabled(boolean enabled)
++    {
++        mHapticsEnabled = enabled;
++    }
++
++    public void startLayoutEditor()
++    {
++        if (mGamepadLayout == null || mEditing)
++            return;
++        showView();
++        mEditing = true;
++        for (java.util.Map.Entry<String, View> entry : mEditableControls.entrySet())
++            installEditorTouch(entry.getKey(), entry.getValue());
++        selectControl(mEditableControls.entrySet().iterator().next().getKey(),
++            mEditableControls.entrySet().iterator().next().getValue());
++        buildEditorBar();
++    }
++
++    private void finishLayoutEditor()
++    {
++        if (!mEditing)
++            return;
++        mEditing = false;
++        for (View control : mEditableControls.values()) {
++            control.setOnTouchListener(null);
++        }
++        if (mEditorBar != null)
++            mHost.removeView(mEditorBar);
++        mEditorBar = null;
++        mSelectedControl = null;
++    }
++
++    private void registerEditableControl(String name, View control)
++    {
++        mEditableControls.put(name, control);
++        control.setTranslationX(mPreferences.getFloat(name + "_x", 0f));
++        control.setTranslationY(mPreferences.getFloat(name + "_y", 0f));
++        float scale = mPreferences.getFloat(name + "_scale", 1f);
++        control.setScaleX(scale);
++        control.setScaleY(scale);
++        control.setAlpha(mPreferences.getFloat(name + "_alpha", 1f));
++    }
++
++    private void installEditorTouch(String name, View control)
++    {
++        control.setOnTouchListener((view, event) -> {
++            switch (event.getActionMasked()) {
++                case MotionEvent.ACTION_DOWN:
++                    selectControl(name, view);
++                    mDragStartRawX = event.getRawX();
++                    mDragStartRawY = event.getRawY();
++                    mDragStartTranslationX = view.getTranslationX();
++                    mDragStartTranslationY = view.getTranslationY();
++                    return true;
++                case MotionEvent.ACTION_MOVE:
++                    view.setTranslationX(mDragStartTranslationX + event.getRawX() - mDragStartRawX);
++                    view.setTranslationY(mDragStartTranslationY + event.getRawY() - mDragStartRawY);
++                    return true;
++                case MotionEvent.ACTION_UP:
++                case MotionEvent.ACTION_CANCEL:
++                    saveControl(name, view);
++                    return true;
++                default:
++                    return true;
++            }
++        });
++    }
++
++    private void selectControl(String name, View control)
++    {
++        mSelectedControl = control;
++        if (mEditorStatus != null)
++            mEditorStatus.setText("Selecionado: " + name);
++    }
++
++    private void buildEditorBar()
++    {
++        mEditorBar = new LinearLayout(mContext);
++        mEditorBar.setOrientation(LinearLayout.HORIZONTAL);
++        mEditorBar.setGravity(Gravity.CENTER_VERTICAL);
++        mEditorBar.setPadding(dp(8), dp(5), dp(8), dp(5));
++        GradientDrawable background = new GradientDrawable();
++        background.setColor(0xEE202020);
++        background.setCornerRadius(dp(10));
++        mEditorBar.setBackground(background);
++
++        mEditorStatus = new TextView(mContext);
++        mEditorStatus.setTextColor(Color.WHITE);
++        mEditorStatus.setText("Arraste um controle");
++        mEditorBar.addView(mEditorStatus);
++        addEditorButton("T-", () -> changeSelectedScale(-0.1f));
++        addEditorButton("T+", () -> changeSelectedScale(0.1f));
++        addEditorButton("O-", () -> changeSelectedAlpha(-0.1f));
++        addEditorButton("O+", () -> changeSelectedAlpha(0.1f));
++        addEditorButton("Padrão", this::resetLayout);
++        addEditorButton("Concluir", this::finishLayoutEditor);
++
++        RelativeLayout.LayoutParams params = new RelativeLayout.LayoutParams(
++            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++        params.addRule(RelativeLayout.ALIGN_PARENT_TOP);
++        params.addRule(RelativeLayout.CENTER_HORIZONTAL);
++        params.setMargins(0, dp(8), 0, 0);
++        mHost.addView(mEditorBar, params);
++        mEditorBar.bringToFront();
++    }
++
++    private void addEditorButton(String label, Runnable action)
++    {
++        Button button = new Button(mContext);
++        button.setText(label);
++        button.setTextSize(11f);
++        button.setMinWidth(0);
++        button.setMinimumWidth(0);
++        button.setPadding(dp(8), 0, dp(8), 0);
++        button.setOnClickListener(v -> action.run());
++        mEditorBar.addView(button, new LinearLayout.LayoutParams(
++            ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)));
++    }
++
++    private void changeSelectedScale(float delta)
++    {
++        if (mSelectedControl == null)
++            return;
++        float scale = Math.max(0.5f, Math.min(2.0f, mSelectedControl.getScaleX() + delta));
++        mSelectedControl.setScaleX(scale);
++        mSelectedControl.setScaleY(scale);
++        saveSelectedControl();
++    }
++
++    private void changeSelectedAlpha(float delta)
++    {
++        if (mSelectedControl == null)
++            return;
++        mSelectedControl.setAlpha(Math.max(0.2f,
++            Math.min(1f, mSelectedControl.getAlpha() + delta)));
++        saveSelectedControl();
++    }
++
++    private void saveSelectedControl()
++    {
++        for (java.util.Map.Entry<String, View> entry : mEditableControls.entrySet())
++            if (entry.getValue() == mSelectedControl) {
++                saveControl(entry.getKey(), entry.getValue());
++                return;
++            }
++    }
++
++    private void saveControl(String name, View control)
++    {
++        mPreferences.edit()
++            .putFloat(name + "_x", control.getTranslationX())
++            .putFloat(name + "_y", control.getTranslationY())
++            .putFloat(name + "_scale", control.getScaleX())
++            .putFloat(name + "_alpha", control.getAlpha())
++            .apply();
++    }
++
++    private void resetLayout()
++    {
++        mPreferences.edit().clear().apply();
++        for (View control : mEditableControls.values()) {
++            control.setTranslationX(0f);
++            control.setTranslationY(0f);
++            control.setScaleX(1f);
++            control.setScaleY(1f);
++            control.setAlpha(1f);
++        }
++    }
++
++    private void performHaptic(int milliseconds)
++    {
++        if (!mHapticsEnabled || mVibrator == null || !mVibrator.hasVibrator())
++            return;
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
++            mVibrator.vibrate(VibrationEffect.createOneShot(milliseconds,
++                VibrationEffect.DEFAULT_AMPLITUDE));
++        else
++            mVibrator.vibrate(milliseconds);
++    }
++
++    private void disableParentClipping(ViewGroup group)
++    {
++        group.setClipChildren(false);
++        group.setClipToPadding(false);
++        for (int i = 0; i < group.getChildCount(); i++)
++            if (group.getChildAt(i) instanceof ViewGroup)
++                disableParentClipping((ViewGroup) group.getChildAt(i));
++    }
++
++    private int dp(int value)
++    {
++        return Math.round(value * mContext.getResources().getDisplayMetrics().density);
++    }
++
+     public void showView()
+     {
+         if (mGamepadLayout != null) {
+@@ -250,4 +496,4 @@ public class Gamepad
+ 
+         return true;
+     }
+-}
+\ No newline at end of file
++}
 diff --git a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
-index 155e305..12de638 100644
+index 155e305..cb15fe3 100644
 --- a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
 +++ b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
 @@ -4,14 +4,17 @@ import android.content.Context;
@@ -988,7 +1318,7 @@ index 155e305..12de638 100644
      public interface OnLoadArchiveListener
      {
          void onLoadArchive();
-@@ -48,43 +62,76 @@ public class SideMenu
+@@ -48,43 +62,89 @@ public class SideMenu
          void onFpsOverlayToggle(boolean enabled);
      }
  
@@ -1005,6 +1335,16 @@ index 155e305..12de638 100644
 +    public interface OnTouchControlsToggleListener
 +    {
 +        void onTouchControlsToggle(boolean enabled);
++    }
++
++    public interface OnEditControlsListener
++    {
++        void onEditControls();
++    }
++
++    public interface OnHapticsToggleListener
++    {
++        void onHapticsToggle(boolean enabled);
 +    }
 +
 +    public interface OnGameAreaScaleChangeListener
@@ -1028,6 +1368,7 @@ index 155e305..12de638 100644
      private Switch mFpsToggle;
 +    private Switch mMuteToggle;
 +    private Switch mTouchControlsToggle;
++    private Switch mHapticsToggle;
 +    private RadioGroup mDisplayModeGroup;
 +    private RadioButton mKeepAspectOption;
 +    private RadioButton mFillScreenOption;
@@ -1051,6 +1392,8 @@ index 155e305..12de638 100644
 +    private OnDisplayModeChangeListener mOnDisplayModeChangeListener = mode -> {};
 +    private OnMuteToggleListener mOnMuteToggleListener = muted -> {};
 +    private OnTouchControlsToggleListener mOnTouchControlsToggleListener = enabled -> {};
++    private OnEditControlsListener mOnEditControlsListener = () -> {};
++    private OnHapticsToggleListener mOnHapticsToggleListener = enabled -> {};
 +    private OnGameAreaScaleChangeListener mOnGameAreaScaleChangeListener = percent -> {};
 +    private OnGraphicsFilterChangeListener mOnGraphicsFilterChangeListener = filter -> {};
  
@@ -1077,7 +1420,7 @@ index 155e305..12de638 100644
  
          build();
          setOffset(-mPanelWidth);
-@@ -110,12 +157,85 @@ public class SideMenu
+@@ -110,12 +170,101 @@ public class SideMenu
          mOnFpsOverlayToggleListener = listener;
      }
  
@@ -1094,6 +1437,16 @@ index 155e305..12de638 100644
 +    public void setOnTouchControlsToggleListener(OnTouchControlsToggleListener listener)
 +    {
 +        mOnTouchControlsToggleListener = listener;
++    }
++
++    public void setOnEditControlsListener(OnEditControlsListener listener)
++    {
++        mOnEditControlsListener = listener;
++    }
++
++    public void setOnHapticsToggleListener(OnHapticsToggleListener listener)
++    {
++        mOnHapticsToggleListener = listener;
 +    }
 +
 +    public void setOnGameAreaScaleChangeListener(OnGameAreaScaleChangeListener listener)
@@ -1122,6 +1475,12 @@ index 155e305..12de638 100644
 +    {
 +        if (mTouchControlsToggle != null)
 +            mTouchControlsToggle.setChecked(enabled);
++    }
++
++    public void setHapticsEnabled(boolean enabled)
++    {
++        if (mHapticsToggle != null)
++            mHapticsToggle.setChecked(enabled);
 +    }
 +
 +    public void setDisplayMode(int mode)
@@ -1163,7 +1522,7 @@ index 155e305..12de638 100644
      public void setGamePath(String path)
      {
          if (mGamePathView != null)
-@@ -142,25 +262,40 @@ public class SideMenu
+@@ -142,25 +291,40 @@ public class SideMenu
          mPanel = new LinearLayout(mContext);
          mPanel.setOrientation(LinearLayout.VERTICAL);
          mPanel.setBackgroundColor(Color.rgb(22, 22, 22));
@@ -1208,7 +1567,7 @@ index 155e305..12de638 100644
  
          Button loadArchive = new Button(mContext);
          loadArchive.setText(R.string.load_archive);
-@@ -173,7 +308,121 @@ public class SideMenu
+@@ -173,7 +337,134 @@ public class SideMenu
              close();
              mOnLoadArchiveListener.onLoadArchive();
          });
@@ -1320,6 +1679,19 @@ index 155e305..12de638 100644
 +            mOnTouchControlsToggleListener.onTouchControlsToggle(isChecked));
 +        content.addView(mTouchControlsToggle);
 +
++        Button editControls = new Button(mContext);
++        editControls.setText(R.string.edit_touch_controls);
++        editControls.setOnClickListener(v -> {
++            close();
++            mOnEditControlsListener.onEditControls();
++        });
++        content.addView(editControls);
++
++        mHapticsToggle = makeSwitch(R.string.control_vibration);
++        mHapticsToggle.setOnCheckedChangeListener((buttonView, isChecked) ->
++            mOnHapticsToggleListener.onHapticsToggle(isChecked));
++        content.addView(mHapticsToggle);
++
 +        addSectionHeader(content, R.string.section_audio);
 +
 +        mMuteToggle = makeSwitch(R.string.mute_audio);
@@ -1331,7 +1703,7 @@ index 155e305..12de638 100644
  
          Button importSaves = new Button(mContext);
          importSaves.setText(R.string.import_saves);
-@@ -186,7 +435,7 @@ public class SideMenu
+@@ -186,7 +477,7 @@ public class SideMenu
              close();
              mOnImportSavesListener.onImportSaves();
          });
@@ -1340,7 +1712,7 @@ index 155e305..12de638 100644
  
          Button exportSaves = new Button(mContext);
          exportSaves.setText(R.string.export_saves);
-@@ -199,112 +448,116 @@ public class SideMenu
+@@ -199,112 +490,116 @@ public class SideMenu
              close();
              mOnExportSavesListener.onExportSaves();
          });
@@ -1541,7 +1913,7 @@ index 155e305..12de638 100644
      }
  
      private void setOffset(float offset)
-@@ -323,7 +576,7 @@ public class SideMenu
+@@ -323,7 +618,7 @@ public class SideMenu
      public void open()
      {
          mOpen = true;
@@ -1550,7 +1922,7 @@ index 155e305..12de638 100644
          mPanel.setVisibility(View.VISIBLE);
          mScrim.setVisibility(View.VISIBLE);
          animateTo(0f);
-@@ -333,8 +586,7 @@ public class SideMenu
+@@ -333,8 +628,7 @@ public class SideMenu
      {
          mOpen = false;
          animateTo(-mPanelWidth);
@@ -1616,10 +1988,10 @@ index 7c821a4..7f546a2 100644
      public static void captureClose() {
          if (mAudioRecord != null) {
 diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
-index 9e37fed..bf3d253 100644
+index 9e37fed..54fec55 100644
 --- a/android/app/src/main/res/values/strings.xml
 +++ b/android/app/src/main/res/values/strings.xml
-@@ -1,11 +1,43 @@
+@@ -1,11 +1,45 @@
  <?xml version="1.0" encoding="utf-8"?>
  <resources>
      <!-- Main application name -->
@@ -1663,6 +2035,8 @@ index 9e37fed..bf3d253 100644
 +    <string name="filter_restarting">Aplicando filtro gráfico…</string>
 +    <string name="filter_apply_failed">Não foi possível aplicar o filtro gráfico.</string>
 +    <string name="show_touch_controls">Mostrar controles na tela</string>
++    <string name="edit_touch_controls">Editar layout dos controles</string>
++    <string name="control_vibration">Vibração dos controles</string>
 +    <string name="mute_audio">Silenciar jogo</string>
 +    <string name="whats_new_title">Novidades da versão %1$s</string>
 +    <string name="whats_new_message">• Pausa automática ao minimizar, bloquear a tela ou receber uma chamada.\n\n• Reconexão de controles Bluetooth e USB sem reiniciar o aplicativo.\n\n• Filtros Pixels nítidos, Bilinear suave e CRT.\n\n• Nova tela de novidades após cada atualização.</string>
