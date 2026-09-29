@@ -9,8 +9,8 @@ privada do aplicativo; as aberturas seguintes iniciam diretamente no jogo.
 1. Abra a aba **Actions** do repositório.
 2. Selecione **Build Nordeluna APK**.
 3. Clique em **Run workflow** e aguarde o sinal verde.
-4. Abra a execução e baixe o artefato **Nordeluna-Android-arm64-v1.4**.
-5. Extraia o ZIP e use `Nordeluna-Android-arm64-v1.4.apk`.
+4. Abra a execução e baixe o artefato **Nordeluna-Android-arm64-v1.5**.
+5. Extraia o ZIP e use `Nordeluna-Android-arm64-v1.5.apk`.
 6. No telefone, permita a instalação de apps dessa fonte e abra o APK.
 
 O APK é assinado com uma chave de depuração preservada pelo GitHub Actions.

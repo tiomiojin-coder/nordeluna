@@ -1,5 +1,5 @@
 diff --git a/android/app/build.gradle b/android/app/build.gradle
-index 036a159..d12c194 100644
+index 036a159..7a5464a 100644
 --- a/android/app/build.gradle
 +++ b/android/app/build.gradle
 @@ -7,12 +7,12 @@ android {
@@ -13,8 +13,8 @@ index 036a159..d12c194 100644
 -        versionCode 1
 -        versionName "0.1.0"
 -        archivesBaseName = "mkxp-z-$versionName"
-+        versionCode 7
-+        versionName "1.4.0"
++        versionCode 8
++        versionName "1.5.0"
 +        archivesBaseName = "Nordeluna-Android-$versionName"
          // Native ABIs are produced by build.sh (see ../build.sh) and placed
          // under src/main/jniLibs/. Everything present there is packaged.
@@ -87,7 +87,7 @@ index a90712f..21d92e7 100644
      </application>
  </manifest>
 diff --git a/android/app/src/main/java/com/mkxpz/MainActivity.java b/android/app/src/main/java/com/mkxpz/MainActivity.java
-index be544a2..67b6b12 100644
+index be544a2..93e1798 100644
 --- a/android/app/src/main/java/com/mkxpz/MainActivity.java
 +++ b/android/app/src/main/java/com/mkxpz/MainActivity.java
 @@ -3,6 +3,7 @@ package com.mkxpz;
@@ -98,16 +98,22 @@ index be544a2..67b6b12 100644
  import android.app.PendingIntent;
  import android.app.ProgressDialog;
  import android.content.Context;
-@@ -15,7 +16,7 @@ import android.view.KeyEvent;
+@@ -11,11 +12,13 @@ import android.content.SharedPreferences;
+ import android.content.pm.ActivityInfo;
+ import android.content.pm.PackageManager;
+ import android.view.View;
++import android.view.Gravity;
+ import android.view.KeyEvent;
  import android.view.MotionEvent;
  import android.view.ViewGroup.LayoutParams;
  import android.widget.TextView;
 -import android.widget.LinearLayout;
++import android.widget.FrameLayout;
 +import android.widget.RelativeLayout;
  import android.widget.Toast;
  import android.graphics.Color;
  import android.graphics.Typeface;
-@@ -35,6 +36,7 @@ import java.util.ArrayList;
+@@ -35,6 +38,7 @@ import java.util.ArrayList;
  import java.util.List;
  import java.io.File;
  import java.io.FileInputStream;
@@ -115,7 +121,7 @@ index be544a2..67b6b12 100644
  import java.io.IOException;
  import java.io.InputStream;
  import java.nio.charset.StandardCharsets;
-@@ -42,6 +44,7 @@ import java.util.regex.Matcher;
+@@ -42,6 +46,7 @@ import java.util.regex.Matcher;
  import java.util.regex.Pattern;
  
  import org.libsdl.app.SDLActivity;
@@ -123,7 +129,7 @@ index be544a2..67b6b12 100644
  import com.mkxpz.gamepad.Gamepad;
  import com.mkxpz.gamepad.GamepadConfig;
  import com.mkxpz.launcher.SideMenu;
-@@ -65,7 +68,12 @@ public class MainActivity extends SDLActivity
+@@ -65,7 +70,13 @@ public class MainActivity extends SDLActivity
  
      private static final String PREFS_NAME = "mkxpz_prefs";
      private static final String PREFS_GAME_PATH = "game_path";
@@ -133,15 +139,17 @@ index be544a2..67b6b12 100644
 +    private static final String PREFS_DISPLAY_MODE = "display_mode";
 +    private static final String PREFS_AUDIO_MUTED = "audio_muted";
 +    private static final String PREFS_TOUCH_CONTROLS = "touch_controls_enabled";
++    private static final String PREFS_GAME_AREA_SCALE = "game_area_scale";
      private static final int REQUEST_LOAD_ARCHIVE = 200;
      private static final int REQUEST_IMPORT_SAVES = 201;
      private static final int REQUEST_EXPORT_SAVES = 202;
-@@ -87,15 +95,18 @@ public class MainActivity extends SDLActivity
+@@ -87,15 +98,19 @@ public class MainActivity extends SDLActivity
      // In-screen gamepad
      private final Gamepad mGamepad = new Gamepad();
      private boolean mGamepadInvisible = false;
 +    private boolean mTouchControlsEnabled = true;
 +    private boolean mBundledInstallInProgress = false;
++    private FrameLayout mGameSurfaceContainer;
  
      // Slide-out launcher menu
      private SideMenu mSideMenu;
@@ -157,7 +165,7 @@ index be544a2..67b6b12 100644
              Log.i(TAG, "Game path: " + GAME_PATH);
          }
  
-@@ -176,6 +187,13 @@ public class MainActivity extends SDLActivity
+@@ -176,6 +191,16 @@ public class MainActivity extends SDLActivity
          GAME_PATH_DEFAULT = new File(gameRootBase, "mkxp-z").getAbsolutePath();
          GAME_PATH = GAME_PATH_DEFAULT;
  
@@ -165,13 +173,16 @@ index be544a2..67b6b12 100644
 +        mTouchControlsEnabled = prefs.getBoolean(PREFS_TOUCH_CONTROLS, true);
 +        boolean audioMuted = prefs.getBoolean(PREFS_AUDIO_MUTED, false);
 +        int displayMode = prefs.getInt(PREFS_DISPLAY_MODE, SideMenu.DISPLAY_KEEP_ASPECT);
++        int gameAreaScale = prefs.getInt(
++            PREFS_GAME_AREA_SCALE, SideMenu.DEFAULT_GAME_AREA_SCALE);
 +        SDLAudioManager.setMuted(audioMuted);
-+        applySurfaceLayoutMode(displayMode);
++        setupGameSurfaceContainer();
++        applySurfaceLayoutMode(displayMode, gameAreaScale);
 +
          mMainHandler = new Handler(getMainLooper());
  
          mStorageManager = (StorageManager) getSystemService(STORAGE_SERVICE);
-@@ -196,7 +214,7 @@ public class MainActivity extends SDLActivity
+@@ -196,7 +221,7 @@ public class MainActivity extends SDLActivity
          }
  
          // Setup in-screen gamepad
@@ -180,7 +191,7 @@ index be544a2..67b6b12 100644
          GamepadConfig gpadConfig = new GamepadConfig();
          mGamepad.init(gpadConfig, mGamepadInvisible);
          mGamepad.setOnKeyDownListener(SDLActivity::onNativeKeyDown);
-@@ -206,7 +224,7 @@ public class MainActivity extends SDLActivity
+@@ -206,7 +231,7 @@ public class MainActivity extends SDLActivity
              mGamepad.attachTo(this, mLayout);
          }
  
@@ -189,7 +200,7 @@ index be544a2..67b6b12 100644
          tvFps = new TextView(this);
          tvFps.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
          tvFps.setTextColor(Color.WHITE);
-@@ -220,14 +238,16 @@ public class MainActivity extends SDLActivity
+@@ -220,14 +245,16 @@ public class MainActivity extends SDLActivity
          tvFps.setPadding(dpPx(10), dpPx(4), dpPx(10), dpPx(4));
          tvFps.setVisibility(View.GONE);
  
@@ -209,15 +220,17 @@ index be544a2..67b6b12 100644
          String savedGamePath = prefs.getString(PREFS_GAME_PATH, null);
          if (savedGamePath != null && new File(savedGamePath).isDirectory()) {
              GAME_PATH = savedGamePath;
-@@ -240,13 +260,16 @@ public class MainActivity extends SDLActivity
+@@ -240,13 +267,18 @@ public class MainActivity extends SDLActivity
          mSideMenu = new SideMenu(this, mLayout);
          mSideMenu.setGamePath(GAME_PATH);
          mSideMenu.setFpsOverlayEnabled(fpsOverlayEnabled);
 +        mSideMenu.setDisplayMode(displayMode);
++        mSideMenu.setGameAreaScale(gameAreaScale);
 +        mSideMenu.setMuted(audioMuted);
 +        mSideMenu.setTouchControlsEnabled(mTouchControlsEnabled);
          mSideMenu.setOnFpsOverlayToggleListener(this::setFpsOverlayEnabled);
 +        mSideMenu.setOnDisplayModeChangeListener(this::setDisplayMode);
++        mSideMenu.setOnGameAreaScaleChangeListener(this::setGameAreaScale);
 +        mSideMenu.setOnMuteToggleListener(this::setAudioMuted);
 +        mSideMenu.setOnTouchControlsToggleListener(this::setTouchControlsEnabled);
          mSideMenu.setOnLoadArchiveListener(this::pickGameArchive);
@@ -229,7 +242,7 @@ index be544a2..67b6b12 100644
      }
  
      @Override
-@@ -261,16 +284,16 @@ public class MainActivity extends SDLActivity
+@@ -261,16 +293,16 @@ public class MainActivity extends SDLActivity
  
                  // Try to mount main OBB file
                  mStorageManager.mountObb(OBB_MAIN_FILENAME, null, obbListener);
@@ -251,7 +264,7 @@ index be544a2..67b6b12 100644
              }
          } else {
              // onStart: Resume SDL thread
-@@ -315,11 +338,9 @@ public class MainActivity extends SDLActivity
+@@ -315,11 +347,9 @@ public class MainActivity extends SDLActivity
      @Override
      public boolean dispatchTouchEvent(MotionEvent evt)
      {
@@ -265,7 +278,7 @@ index be544a2..67b6b12 100644
              mGamepad.showView();
              mGamepadInvisible = false;
          }
-@@ -392,6 +413,145 @@ public class MainActivity extends SDLActivity
+@@ -392,6 +422,178 @@ public class MainActivity extends SDLActivity
              tvFps.setVisibility(View.GONE);
      }
  
@@ -393,17 +406,50 @@ index be544a2..67b6b12 100644
 +            "\": " + value + "\n" + json.substring(closingBrace);
 +    }
 +
-+    private void applySurfaceLayoutMode(int mode)
++    private void setGameAreaScale(int percent)
 +    {
-+        RelativeLayout.LayoutParams surfaceParams;
++        int clamped = Math.max(SideMenu.MIN_GAME_AREA_SCALE,
++            Math.min(SideMenu.MAX_GAME_AREA_SCALE, percent));
++        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
++            .edit()
++            .putInt(PREFS_GAME_AREA_SCALE, clamped)
++            .apply();
++
++        int displayMode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(
++            PREFS_DISPLAY_MODE, SideMenu.DISPLAY_KEEP_ASPECT);
++        applySurfaceLayoutMode(displayMode, clamped);
++    }
++
++    private void setupGameSurfaceContainer()
++    {
++        if (mGameSurfaceContainer != null)
++            return;
++
++        mLayout.removeView(mSurface);
++        mGameSurfaceContainer = new FrameLayout(this);
++        mGameSurfaceContainer.setBackgroundColor(Color.BLACK);
++        RelativeLayout.LayoutParams containerParams = new RelativeLayout.LayoutParams(
++            LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
++        mLayout.addView(mGameSurfaceContainer, 0, containerParams);
++        mGameSurfaceContainer.addView(mSurface);
++    }
++
++    private void applySurfaceLayoutMode(int mode, int areaScalePercent)
++    {
++        FrameLayout.LayoutParams surfaceParams;
 +        if (mode == SideMenu.DISPLAY_ORIGINAL_SIZE) {
-+            // Nordeluna renders at 512x384. These are physical pixels on
-+            // purpose: this option provides a true 1:1 game image.
-+            surfaceParams = new RelativeLayout.LayoutParams(512, 384);
-+            surfaceParams.addRule(RelativeLayout.CENTER_IN_PARENT);
++            int availableWidth = getResources().getDisplayMetrics().widthPixels;
++            int availableHeight = getResources().getDisplayMetrics().heightPixels;
++            float requestedScale = Math.max(SideMenu.MIN_GAME_AREA_SCALE,
++                Math.min(SideMenu.MAX_GAME_AREA_SCALE, areaScalePercent)) / 100f;
++            float fittingScale = Math.min(availableWidth / 512f, availableHeight / 384f);
++            float appliedScale = Math.min(requestedScale, fittingScale);
++            int width = Math.max(1, Math.round(512f * appliedScale));
++            int height = Math.max(1, Math.round(384f * appliedScale));
++            surfaceParams = new FrameLayout.LayoutParams(width, height, Gravity.CENTER);
 +        } else {
-+            surfaceParams = new RelativeLayout.LayoutParams(
-+                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
++            surfaceParams = new FrameLayout.LayoutParams(
++                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.CENTER);
 +        }
 +        mSurface.setLayoutParams(surfaceParams);
 +    }
@@ -411,7 +457,7 @@ index be544a2..67b6b12 100644
      /**
       * This static method is used in native mkxp-z. (see systemImpl.cpp)
       * This method returns a string of current device locale tag. (e.g. "en_US")
-@@ -681,6 +841,116 @@ public class MainActivity extends SDLActivity
+@@ -681,6 +883,116 @@ public class MainActivity extends SDLActivity
          }).start();
      }
  
@@ -528,7 +574,7 @@ index be544a2..67b6b12 100644
      /**
       * Searches for the directory that actually contains a game, starting from
       * {@code root} and descending into its subdirectories.
-@@ -810,33 +1080,4 @@ public class MainActivity extends SDLActivity
+@@ -810,33 +1122,4 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
@@ -563,10 +609,10 @@ index be544a2..67b6b12 100644
 -    }
  }
 diff --git a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
-index 155e305..9a19401 100644
+index 155e305..e545c39 100644
 --- a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
 +++ b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
-@@ -4,14 +4,16 @@ import android.content.Context;
+@@ -4,14 +4,17 @@ import android.content.Context;
  import android.graphics.Color;
  import android.graphics.Typeface;
  import android.graphics.drawable.GradientDrawable;
@@ -582,10 +628,11 @@ index 155e305..9a19401 100644
 +import android.widget.RadioGroup;
  import android.widget.RelativeLayout;
 +import android.widget.ScrollView;
++import android.widget.SeekBar;
  import android.widget.Switch;
  import android.widget.TextView;
  
-@@ -22,12 +24,16 @@ import com.mkxpz.R;
+@@ -22,12 +25,20 @@ import com.mkxpz.R;
   *
   * <p>The menu is kept as a set of sibling views added to the activity's
   * content {@link RelativeLayout}, so it does not require restructuring the
@@ -601,11 +648,15 @@ index 155e305..9a19401 100644
 +    public static final int DISPLAY_KEEP_ASPECT = 0;
 +    public static final int DISPLAY_FILL_SCREEN = 1;
 +    public static final int DISPLAY_ORIGINAL_SIZE = 2;
++    public static final int MIN_GAME_AREA_SCALE = 100;
++    public static final int MAX_GAME_AREA_SCALE = 250;
++    public static final int DEFAULT_GAME_AREA_SCALE = 150;
++    private static final int GAME_AREA_SCALE_STEP = 10;
 +
      public interface OnLoadArchiveListener
      {
          void onLoadArchive();
-@@ -48,43 +54,58 @@ public class SideMenu
+@@ -48,43 +59,66 @@ public class SideMenu
          void onFpsOverlayToggle(boolean enabled);
      }
  
@@ -624,6 +675,11 @@ index 155e305..9a19401 100644
 +        void onTouchControlsToggle(boolean enabled);
 +    }
 +
++    public interface OnGameAreaScaleChangeListener
++    {
++        void onGameAreaScaleChange(int percent);
++    }
++
      private final Context mContext;
      private final ViewGroup mRoot;
  
@@ -639,6 +695,8 @@ index 155e305..9a19401 100644
 +    private RadioButton mKeepAspectOption;
 +    private RadioButton mFillScreenOption;
 +    private RadioButton mIntegerSizeOption;
++    private TextView mGameAreaScaleLabel;
++    private SeekBar mGameAreaScaleSlider;
  
      private final int mPanelWidth;
 -    private final int mHandleWidth;
@@ -652,6 +710,7 @@ index 155e305..9a19401 100644
 +    private OnDisplayModeChangeListener mOnDisplayModeChangeListener = mode -> {};
 +    private OnMuteToggleListener mOnMuteToggleListener = muted -> {};
 +    private OnTouchControlsToggleListener mOnTouchControlsToggleListener = enabled -> {};
++    private OnGameAreaScaleChangeListener mOnGameAreaScaleChangeListener = percent -> {};
  
      private boolean mOpen = false;
 -    private boolean mDidDrag = false;
@@ -676,7 +735,7 @@ index 155e305..9a19401 100644
  
          build();
          setOffset(-mPanelWidth);
-@@ -110,12 +131,52 @@ public class SideMenu
+@@ -110,12 +144,68 @@ public class SideMenu
          mOnFpsOverlayToggleListener = listener;
      }
  
@@ -693,6 +752,11 @@ index 155e305..9a19401 100644
 +    public void setOnTouchControlsToggleListener(OnTouchControlsToggleListener listener)
 +    {
 +        mOnTouchControlsToggleListener = listener;
++    }
++
++    public void setOnGameAreaScaleChangeListener(OnGameAreaScaleChangeListener listener)
++    {
++        mOnGameAreaScaleChangeListener = listener;
 +    }
 +
      public void setFpsOverlayEnabled(boolean enabled)
@@ -724,12 +788,23 @@ index 155e305..9a19401 100644
 +            mIntegerSizeOption.setChecked(true);
 +        else
 +            mKeepAspectOption.setChecked(true);
++
++        updateGameAreaScaleEnabled(mode == DISPLAY_ORIGINAL_SIZE);
++    }
++
++    public void setGameAreaScale(int percent)
++    {
++        if (mGameAreaScaleSlider == null)
++            return;
++        int value = normalizeGameAreaScale(percent);
++        mGameAreaScaleSlider.setProgress(value - MIN_GAME_AREA_SCALE);
++        updateGameAreaScaleLabel(value);
 +    }
 +
      public void setGamePath(String path)
      {
          if (mGamePathView != null)
-@@ -142,25 +203,40 @@ public class SideMenu
+@@ -142,25 +232,40 @@ public class SideMenu
          mPanel = new LinearLayout(mContext);
          mPanel.setOrientation(LinearLayout.VERTICAL);
          mPanel.setBackgroundColor(Color.rgb(22, 22, 22));
@@ -774,7 +849,7 @@ index 155e305..9a19401 100644
  
          Button loadArchive = new Button(mContext);
          loadArchive.setText(R.string.load_archive);
-@@ -173,7 +249,47 @@ public class SideMenu
+@@ -173,7 +278,90 @@ public class SideMenu
              close();
              mOnLoadArchiveListener.onLoadArchive();
          });
@@ -793,17 +868,60 @@ index 155e305..9a19401 100644
 +        mDisplayModeGroup.addView(mFillScreenOption);
 +        mDisplayModeGroup.addView(mIntegerSizeOption);
 +        mDisplayModeGroup.setOnCheckedChangeListener((group, checkedId) -> {
-+            if (checkedId == mFillScreenOption.getId())
++            if (checkedId == mFillScreenOption.getId()) {
++                updateGameAreaScaleEnabled(false);
 +                mOnDisplayModeChangeListener.onDisplayModeChange(DISPLAY_FILL_SCREEN);
-+            else if (checkedId == mIntegerSizeOption.getId())
++            } else if (checkedId == mIntegerSizeOption.getId()) {
++                updateGameAreaScaleEnabled(true);
 +                mOnDisplayModeChangeListener.onDisplayModeChange(DISPLAY_ORIGINAL_SIZE);
-+            else if (checkedId == mKeepAspectOption.getId())
++            } else if (checkedId == mKeepAspectOption.getId()) {
++                updateGameAreaScaleEnabled(false);
 +                mOnDisplayModeChangeListener.onDisplayModeChange(DISPLAY_KEEP_ASPECT);
++            }
 +        });
 +        content.addView(mDisplayModeGroup);
 +
 +        TextView displayHint = makeHint(R.string.display_restart_hint);
 +        content.addView(displayHint);
++
++        mGameAreaScaleLabel = new TextView(mContext);
++        mGameAreaScaleLabel.setTextColor(Color.WHITE);
++        mGameAreaScaleLabel.setTextSize(14f);
++        LinearLayout.LayoutParams areaLabelLp = new LinearLayout.LayoutParams(
++            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++        areaLabelLp.setMargins(0, dp(18), 0, dp(2));
++        mGameAreaScaleLabel.setLayoutParams(areaLabelLp);
++        content.addView(mGameAreaScaleLabel);
++
++        mGameAreaScaleSlider = new SeekBar(mContext);
++        mGameAreaScaleSlider.setMax(MAX_GAME_AREA_SCALE - MIN_GAME_AREA_SCALE);
++        mGameAreaScaleSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener()
++        {
++            @Override
++            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser)
++            {
++                int value = normalizeGameAreaScale(MIN_GAME_AREA_SCALE + progress);
++                updateGameAreaScaleLabel(value);
++            }
++
++            @Override
++            public void onStartTrackingTouch(SeekBar seekBar) { }
++
++            @Override
++            public void onStopTrackingTouch(SeekBar seekBar)
++            {
++                int value = normalizeGameAreaScale(MIN_GAME_AREA_SCALE + seekBar.getProgress());
++                seekBar.setProgress(value - MIN_GAME_AREA_SCALE);
++                mOnGameAreaScaleChangeListener.onGameAreaScaleChange(value);
++            }
++        });
++        content.addView(mGameAreaScaleSlider, new LinearLayout.LayoutParams(
++            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
++
++        TextView areaHint = makeHint(R.string.game_area_scale_hint);
++        content.addView(areaHint);
++        setGameAreaScale(DEFAULT_GAME_AREA_SCALE);
++        updateGameAreaScaleEnabled(false);
 +
 +        addSectionHeader(content, R.string.section_controls);
 +
@@ -823,7 +941,7 @@ index 155e305..9a19401 100644
  
          Button importSaves = new Button(mContext);
          importSaves.setText(R.string.import_saves);
-@@ -186,7 +302,7 @@ public class SideMenu
+@@ -186,7 +374,7 @@ public class SideMenu
              close();
              mOnImportSavesListener.onImportSaves();
          });
@@ -832,7 +950,7 @@ index 155e305..9a19401 100644
  
          Button exportSaves = new Button(mContext);
          exportSaves.setText(R.string.export_saves);
-@@ -199,112 +315,92 @@ public class SideMenu
+@@ -199,112 +387,116 @@ public class SideMenu
              close();
              mOnExportSavesListener.onExportSaves();
          });
@@ -919,6 +1037,12 @@ index 155e305..9a19401 100644
      {
 -        if (mHandle == null)
 -            return;
+-
+-        mHandle.removeCallbacks(mHideHandleRunnable);
+-        mHandle.animate().cancel();
+-        mHandle.setVisibility(View.VISIBLE);
+-        mHandle.setAlpha(1f);
+-        mHandle.postDelayed(mHideHandleRunnable, HANDLE_REVEAL_DURATION_MS);
 +        RadioButton option = new RadioButton(mContext);
 +        option.setId(View.generateViewId());
 +        option.setText(textResource);
@@ -926,15 +1050,13 @@ index 155e305..9a19401 100644
 +        option.setTextSize(15f);
 +        option.setMinHeight(dp(44));
 +        return option;
-+    }
+     }
  
--        mHandle.removeCallbacks(mHideHandleRunnable);
--        mHandle.animate().cancel();
--        mHandle.setVisibility(View.VISIBLE);
--        mHandle.setAlpha(1f);
--        mHandle.postDelayed(mHideHandleRunnable, HANDLE_REVEAL_DURATION_MS);
+-    private void hideHandle()
 +    private Switch makeSwitch(int textResource)
-+    {
+     {
+-        if (mHandle == null)
+-            return;
 +        Switch toggle = new Switch(mContext);
 +        toggle.setText(textResource);
 +        toggle.setTextColor(Color.WHITE);
@@ -943,19 +1065,6 @@ index 155e305..9a19401 100644
 +        toggle.setLayoutParams(new LinearLayout.LayoutParams(
 +            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 +        return toggle;
-     }
- 
--    private void hideHandle()
-+    private TextView makeHint(int textResource)
-     {
--        if (mHandle == null)
--            return;
-+        TextView hint = new TextView(mContext);
-+        hint.setText(textResource);
-+        hint.setTextColor(0xAFFFFFFF);
-+        hint.setTextSize(12f);
-+        hint.setPadding(dp(4), dp(4), dp(4), 0);
-+        return hint;
 +    }
  
 -        mHandle.animate()
@@ -963,10 +1072,19 @@ index 155e305..9a19401 100644
 -            .setDuration(300)
 -            .withEndAction(() -> mHandle.setVisibility(View.INVISIBLE))
 -            .start();
--    }
--
++    private TextView makeHint(int textResource)
++    {
++        TextView hint = new TextView(mContext);
++        hint.setText(textResource);
++        hint.setTextColor(0xAFFFFFFF);
++        hint.setTextSize(12f);
++        hint.setPadding(dp(4), dp(4), dp(4), 0);
++        return hint;
+     }
+ 
 -    private boolean onHandleTouch(View v, MotionEvent ev)
--    {
++    private int normalizeGameAreaScale(int percent)
+     {
 -        switch (ev.getActionMasked())
 -        {
 -            case MotionEvent.ACTION_DOWN:
@@ -983,12 +1101,22 @@ index 155e305..9a19401 100644
 -                float dx = ev.getRawX() - mDragStartRawX;
 -                if (!mDidDrag && Math.abs(dx) > mTouchSlop)
 -                    mDidDrag = true;
--
++        int clamped = Math.max(MIN_GAME_AREA_SCALE, Math.min(MAX_GAME_AREA_SCALE, percent));
++        return Math.round((clamped - MIN_GAME_AREA_SCALE) / (float) GAME_AREA_SCALE_STEP) *
++            GAME_AREA_SCALE_STEP + MIN_GAME_AREA_SCALE;
++    }
+ 
 -                if (mDidDrag)
 -                    setOffset(clamp(mDragStartOffset + dx, -mPanelWidth, 0f));
 -                return true;
 -            }
--
++    private void updateGameAreaScaleLabel(int percent)
++    {
++        if (mGameAreaScaleLabel != null)
++            mGameAreaScaleLabel.setText(
++                mContext.getString(R.string.game_area_scale, percent));
++    }
+ 
 -            case MotionEvent.ACTION_UP:
 -            case MotionEvent.ACTION_CANCEL:
 -                if (!mDidDrag) {
@@ -1000,15 +1128,21 @@ index 155e305..9a19401 100644
 -                    close();
 -                }
 -                return true;
--        }
--        return false;
--    }
--
--    private float clamp(float value, float min, float max)
--    {
--        return Math.max(min, Math.min(max, value));
-+    private GradientDrawable makeConfigButtonDrawable()
++    private void updateGameAreaScaleEnabled(boolean enabled)
 +    {
++        if (mGameAreaScaleSlider != null) {
++            mGameAreaScaleSlider.setEnabled(enabled);
++            mGameAreaScaleSlider.setAlpha(enabled ? 1f : 0.4f);
+         }
+-        return false;
++        if (mGameAreaScaleLabel != null)
++            mGameAreaScaleLabel.setAlpha(enabled ? 1f : 0.4f);
+     }
+ 
+-    private float clamp(float value, float min, float max)
++    private GradientDrawable makeConfigButtonDrawable()
+     {
+-        return Math.max(min, Math.min(max, value));
 +        GradientDrawable d = new GradientDrawable();
 +        d.setColor(0xCC202020);
 +        d.setStroke(dp(1), 0x88FFFFFF);
@@ -1017,7 +1151,7 @@ index 155e305..9a19401 100644
      }
  
      private void setOffset(float offset)
-@@ -323,7 +419,7 @@ public class SideMenu
+@@ -323,7 +515,7 @@ public class SideMenu
      public void open()
      {
          mOpen = true;
@@ -1026,7 +1160,7 @@ index 155e305..9a19401 100644
          mPanel.setVisibility(View.VISIBLE);
          mScrim.setVisibility(View.VISIBLE);
          animateTo(0f);
-@@ -333,8 +429,7 @@ public class SideMenu
+@@ -333,8 +525,7 @@ public class SideMenu
      {
          mOpen = false;
          animateTo(-mPanelWidth);
@@ -1073,10 +1207,10 @@ index 7c821a4..56bad33 100644
      public static void captureClose() {
          if (mAudioRecord != null) {
 diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
-index 9e37fed..c559fb5 100644
+index 9e37fed..21555fb 100644
 --- a/android/app/src/main/res/values/strings.xml
 +++ b/android/app/src/main/res/values/strings.xml
-@@ -1,11 +1,29 @@
+@@ -1,11 +1,31 @@
  <?xml version="1.0" encoding="utf-8"?>
  <resources>
      <!-- Main application name -->
@@ -1108,6 +1242,8 @@ index 9e37fed..c559fb5 100644
 +    <string name="apply_and_restart">Aplicar e reiniciar</string>
 +    <string name="display_restarting">Aplicando modo de tela…</string>
 +    <string name="display_apply_failed">Não foi possível aplicar o modo de tela.</string>
++    <string name="game_area_scale">Tamanho da área do jogo: %1$d%%</string>
++    <string name="game_area_scale_hint">Disponível no modo Tamanho original. A alteração aparece imediatamente.</string>
 +    <string name="show_touch_controls">Mostrar controles na tela</string>
 +    <string name="mute_audio">Silenciar jogo</string>
  </resources>
