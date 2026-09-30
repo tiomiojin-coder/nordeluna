@@ -1,5 +1,5 @@
 diff --git a/android/app/build.gradle b/android/app/build.gradle
-index 036a159..cb175ec 100644
+index 036a159..eed0ab8 100644
 --- a/android/app/build.gradle
 +++ b/android/app/build.gradle
 @@ -7,12 +7,12 @@ android {
@@ -13,8 +13,8 @@ index 036a159..cb175ec 100644
 -        versionCode 1
 -        versionName "0.1.0"
 -        archivesBaseName = "mkxp-z-$versionName"
-+        versionCode 10
-+        versionName "1.7.0"
++        versionCode 11
++        versionName "1.8.0"
 +        archivesBaseName = "Nordeluna-Android-$versionName"
          // Native ABIs are produced by build.sh (see ../build.sh) and placed
          // under src/main/jniLibs/. Everything present there is packaged.
@@ -2403,7 +2403,7 @@ index 155e305..1595570 100644
  
      public void toggle()
 diff --git a/android/app/src/main/java/org/libsdl/app/SDLAudioManager.java b/android/app/src/main/java/org/libsdl/app/SDLAudioManager.java
-index 7c821a4..7f546a2 100644
+index 7c821a4..c5f9920 100644
 --- a/android/app/src/main/java/org/libsdl/app/SDLAudioManager.java
 +++ b/android/app/src/main/java/org/libsdl/app/SDLAudioManager.java
 @@ -19,6 +19,8 @@ public class SDLAudioManager {
@@ -2425,7 +2425,44 @@ index 7c821a4..7f546a2 100644
              }
  
              results[0] = mAudioTrack.getSampleRate();
-@@ -477,6 +482,31 @@ public class SDLAudioManager {
+@@ -365,6 +370,12 @@ public class SDLAudioManager {
+             return;
+         }
+ 
++        // Some Android devices keep already queued PCM audible even after
++        // AudioTrack.setVolume(0). Silence each SDL buffer as well so mute is
++        // immediate and applies to both new and queued game audio.
++        if (mMuted)
++            Arrays.fill(buffer, 0.0f);
++
+         for (int i = 0; i < buffer.length;) {
+             int result = mAudioTrack.write(buffer, i, buffer.length - i, AudioTrack.WRITE_BLOCKING);
+             if (result > 0) {
+@@ -391,6 +402,9 @@ public class SDLAudioManager {
+             return;
+         }
+ 
++        if (mMuted)
++            Arrays.fill(buffer, (short) 0);
++
+         for (int i = 0; i < buffer.length;) {
+             int result = mAudioTrack.write(buffer, i, buffer.length - i);
+             if (result > 0) {
+@@ -417,6 +431,13 @@ public class SDLAudioManager {
+             return;
+         }
+ 
++        if (mMuted) {
++            // Unsigned 8-bit PCM represents silence at its midpoint.
++            byte silence = mAudioTrack.getAudioFormat() == AudioFormat.ENCODING_PCM_8BIT
++                ? (byte) 0x80 : 0;
++            Arrays.fill(buffer, silence);
++        }
++
+         for (int i = 0; i < buffer.length; ) {
+             int result = mAudioTrack.write(buffer, i, buffer.length - i);
+             if (result > 0) {
+@@ -477,6 +498,36 @@ public class SDLAudioManager {
          }
      }
  
@@ -2434,7 +2471,12 @@ index 7c821a4..7f546a2 100644
 +        mMuted = muted;
 +        AudioTrack track = mAudioTrack;
 +        if (track != null) {
-+            track.setVolume(muted ? 0.0f : 1.0f);
++            try {
++                track.setVolume(muted ? 0.0f : 1.0f);
++                track.setStereoVolume(muted ? 0.0f : 1.0f, muted ? 0.0f : 1.0f);
++            } catch (IllegalStateException e) {
++                Log.w(TAG, "Unable to update SDL audio volume", e);
++            }
 +        }
 +    }
 +
@@ -2458,7 +2500,7 @@ index 7c821a4..7f546a2 100644
      public static void captureClose() {
          if (mAudioRecord != null) {
 diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
-index 9e37fed..0cb06b7 100644
+index 9e37fed..9a83ce0 100644
 --- a/android/app/src/main/res/values/strings.xml
 +++ b/android/app/src/main/res/values/strings.xml
 @@ -1,11 +1,46 @@
@@ -2510,6 +2552,6 @@ index 9e37fed..0cb06b7 100644
 +    <string name="control_vibration">Vibração dos controles</string>
 +    <string name="mute_audio">Silenciar jogo</string>
 +    <string name="whats_new_title">Novidades da versão %1$s</string>
-+    <string name="whats_new_message">• Editor para arrastar, redimensionar e ajustar a transparência dos controles.\n\n• Vibração opcional nos controles.\n\n• Exportação e importação de saves em ZIP com metadados do aparelho e da versão.\n\n• Backup automático antes de importar saves.\n\n• Relatório de erro exportável com informações do aparelho e logs.\n\n• Atualização do jogo Nordeluna.</string>
++    <string name="whats_new_message">• Correção do botão de silenciar: o áudio SDL é silenciado diretamente.\n\n• Editor para arrastar, redimensionar e ajustar a transparência dos controles.\n\n• Vibração opcional nos controles.\n\n• Exportação e importação de saves em ZIP com metadados e backup antes de importar.\n\n• Relatório de erro exportável com informações do aparelho e logs.\n\n• Atualização do jogo Nordeluna.</string>
 +    <string name="got_it">Entendi</string>
  </resources>
