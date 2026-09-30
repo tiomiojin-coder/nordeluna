@@ -20,7 +20,7 @@ env:
   MKXP_Z_COMMIT: 17a5ec6cb3e8d2de05a82451bc4910f36517d322
   REFERENCE_APK_URL: https://codeberg.org/warmwinter/mkxp-z/releases/download/uranium-android@0.2.0/uranium-0.2.0.apk
   REFERENCE_APK_SHA256: 4a520f7784f1f7e3493c9970da0748a483a0f88400627bcc6a705529c1407653
-  GAME_ARCHIVE_SHA256: 136eacc2637280b1630bba8420d9984da9572fcd68015482f779cecb858cac6a
+  GAME_ARCHIVE_SHA256: 2090b9ff8bb0f6a7a118610c78aa733c5b06d22062d560e60852ee8af54755ae
 
 jobs:
   build:
@@ -106,17 +106,17 @@ jobs:
           test -n "$APK"
           unzip -l "$APK" | grep -F 'assets/nordeluna-game.zip'
           unzip -l "$APK" | grep -F 'lib/arm64-v8a/libmkxp-z.so'
-          cp "$APK" build-android/Nordeluna-Android-arm64-v1.6.apk
-          sha256sum build-android/Nordeluna-Android-arm64-v1.6.apk > build-android/Nordeluna-Android-arm64-v1.6.apk.sha256
-          ls -lh build-android/Nordeluna-Android-arm64-v1.6.apk
+          cp "$APK" build-android/Nordeluna-Android-arm64-v1.7.apk
+          sha256sum build-android/Nordeluna-Android-arm64-v1.7.apk > build-android/Nordeluna-Android-arm64-v1.7.apk.sha256
+          ls -lh build-android/Nordeluna-Android-arm64-v1.7.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Nordeluna-Android-arm64-v1.6
+          name: Nordeluna-Android-arm64-v1.7
           path: |
-            build-android/Nordeluna-Android-arm64-v1.6.apk
-            build-android/Nordeluna-Android-arm64-v1.6.apk.sha256
+            build-android/Nordeluna-Android-arm64-v1.7.apk
+            build-android/Nordeluna-Android-arm64-v1.7.apk.sha256
           compression-level: 0
           retention-days: 14
 

@@ -1,5 +1,5 @@
 diff --git a/android/app/build.gradle b/android/app/build.gradle
-index 036a159..2b36168 100644
+index 036a159..cb175ec 100644
 --- a/android/app/build.gradle
 +++ b/android/app/build.gradle
 @@ -7,12 +7,12 @@ android {
@@ -13,8 +13,8 @@ index 036a159..2b36168 100644
 -        versionCode 1
 -        versionName "0.1.0"
 -        archivesBaseName = "mkxp-z-$versionName"
-+        versionCode 9
-+        versionName "1.6.0"
++        versionCode 10
++        versionName "1.7.0"
 +        archivesBaseName = "Nordeluna-Android-$versionName"
          // Native ABIs are produced by build.sh (see ../build.sh) and placed
          // under src/main/jniLibs/. Everything present there is packaged.
@@ -1539,7 +1539,7 @@ index 0000000..3603414
 +    }
 +}
 diff --git a/android/app/src/main/java/com/mkxpz/launcher/SaveTransfer.java b/android/app/src/main/java/com/mkxpz/launcher/SaveTransfer.java
-index fa96fbb..091566b 100644
+index fa96fbb..7ddd625 100644
 --- a/android/app/src/main/java/com/mkxpz/launcher/SaveTransfer.java
 +++ b/android/app/src/main/java/com/mkxpz/launcher/SaveTransfer.java
 @@ -7,6 +7,7 @@ import android.net.Uri;
@@ -1636,7 +1636,7 @@ index fa96fbb..091566b 100644
                  if (!isSaveFileName(name)) {
                      Log.w(TAG, "Skipping non-save file: " + name);
                      continue;
-@@ -168,6 +227,68 @@ public final class SaveTransfer
+@@ -168,6 +227,71 @@ public final class SaveTransfer
          return imported;
      }
  
@@ -1653,14 +1653,17 @@ index fa96fbb..091566b 100644
 +                String safeName = new File(entry.getName()).getName();
 +                if (entry.isDirectory() || !isSaveFileName(safeName))
 +                    continue;
++                java.io.ByteArrayOutputStream contents = new java.io.ByteArrayOutputStream();
++                int count;
++                while ((count = zip.read(buffer)) > 0)
++                    contents.write(buffer, 0, count);
++                byte[] saveData = contents.toByteArray();
 +                boolean copied = false;
 +                for (File root : roots) {
 +                    if (root == null || !root.isDirectory())
 +                        continue;
 +                    try (OutputStream out = new FileOutputStream(new File(root, safeName))) {
-+                        int count;
-+                        while ((count = zip.read(buffer)) > 0)
-+                            out.write(buffer, 0, count);
++                        out.write(saveData);
 +                    }
 +                    copied = true;
 +                }
@@ -2455,7 +2458,7 @@ index 7c821a4..7f546a2 100644
      public static void captureClose() {
          if (mAudioRecord != null) {
 diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
-index 9e37fed..fb3cf9a 100644
+index 9e37fed..0cb06b7 100644
 --- a/android/app/src/main/res/values/strings.xml
 +++ b/android/app/src/main/res/values/strings.xml
 @@ -1,11 +1,46 @@
@@ -2507,6 +2510,6 @@ index 9e37fed..fb3cf9a 100644
 +    <string name="control_vibration">Vibração dos controles</string>
 +    <string name="mute_audio">Silenciar jogo</string>
 +    <string name="whats_new_title">Novidades da versão %1$s</string>
-+    <string name="whats_new_message">• Pausa automática ao minimizar, bloquear a tela ou receber uma chamada.\n\n• Reconexão de controles Bluetooth e USB sem reiniciar o aplicativo.\n\n• Filtros Pixels nítidos, Bilinear suave e CRT.\n\n• Nova tela de novidades após cada atualização.</string>
++    <string name="whats_new_message">• Editor para arrastar, redimensionar e ajustar a transparência dos controles.\n\n• Vibração opcional nos controles.\n\n• Exportação e importação de saves em ZIP com metadados do aparelho e da versão.\n\n• Backup automático antes de importar saves.\n\n• Relatório de erro exportável com informações do aparelho e logs.\n\n• Atualização do jogo Nordeluna.</string>
 +    <string name="got_it">Entendi</string>
  </resources>
