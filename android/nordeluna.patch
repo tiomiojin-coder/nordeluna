@@ -87,7 +87,7 @@ index a90712f..21d92e7 100644
      </application>
  </manifest>
 diff --git a/android/app/src/main/java/com/mkxpz/MainActivity.java b/android/app/src/main/java/com/mkxpz/MainActivity.java
-index be544a2..9103e49 100644
+index be544a2..e824bf3 100644
 --- a/android/app/src/main/java/com/mkxpz/MainActivity.java
 +++ b/android/app/src/main/java/com/mkxpz/MainActivity.java
 @@ -3,6 +3,7 @@ package com.mkxpz;
@@ -504,7 +504,7 @@ index be544a2..9103e49 100644
              mGamepad.showView();
              mGamepadInvisible = false;
          }
-@@ -392,6 +598,341 @@ public class MainActivity extends SDLActivity
+@@ -392,6 +598,381 @@ public class MainActivity extends SDLActivity
              tvFps.setVisibility(View.GONE);
      }
  
@@ -605,7 +605,7 @@ index be544a2..9103e49 100644
 +
 +    private void setGraphicsFilter(int filter)
 +    {
-+        if (filter < SideMenu.FILTER_PIXEL || filter > SideMenu.FILTER_CRT)
++        if (filter < SideMenu.FILTER_PIXEL || filter > SideMenu.FILTER_XBRZ)
 +            filter = SideMenu.FILTER_PIXEL;
 +
 +        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -665,9 +665,29 @@ index be544a2..9103e49 100644
 +            return false;
 +        }
 +
-+        int smoothScaling = filter == SideMenu.FILTER_BILINEAR ? 1 : 0;
++        int smoothScaling;
++        switch (filter) {
++            case SideMenu.FILTER_BILINEAR:
++                smoothScaling = 1;
++                break;
++            case SideMenu.FILTER_BICUBIC:
++                smoothScaling = 2;
++                break;
++            case SideMenu.FILTER_LANCZOS:
++                smoothScaling = 3;
++                break;
++            case SideMenu.FILTER_XBRZ:
++                smoothScaling = 4;
++                break;
++            default:
++                // Nearest-neighbor is intentionally used under CRT as well.
++                smoothScaling = 0;
++                break;
++        }
 +        String json = setJsonInteger(sb.toString(), "smoothScaling", smoothScaling);
 +        json = setJsonInteger(json, "smoothScalingDown", smoothScaling);
++        json = setJsonInteger(json, "bitmapSmoothScaling", smoothScaling);
++        json = setJsonInteger(json, "bitmapSmoothScalingDown", smoothScaling);
 +
 +        try (FileOutputStream out = new FileOutputStream(configFile, false)) {
 +            out.write(json.getBytes(StandardCharsets.UTF_8));
@@ -817,18 +837,34 @@ index be544a2..9103e49 100644
 +    private static final class CrtOverlayView extends View
 +    {
 +        private final Paint mScanlinePaint = new Paint();
++        private final Paint mPhosphorPaint = new Paint();
 +        private final Paint mEdgePaint = new Paint();
++        private final Paint mVignettePaint = new Paint();
 +
 +        CrtOverlayView(Context context)
 +        {
 +            super(context);
-+            mScanlinePaint.setColor(0x30000000);
++            mScanlinePaint.setColor(0x50000000);
 +            mScanlinePaint.setStyle(Paint.Style.FILL);
 +            mScanlinePaint.setAntiAlias(false);
-+            mEdgePaint.setColor(0x22000000);
++            mPhosphorPaint.setColor(0x1679E8F2);
++            mPhosphorPaint.setStyle(Paint.Style.FILL);
++            mPhosphorPaint.setAntiAlias(false);
++            mEdgePaint.setColor(0x5535C6DC);
 +            mEdgePaint.setStyle(Paint.Style.STROKE);
-+            mEdgePaint.setStrokeWidth(8f);
++            mEdgePaint.setStrokeWidth(14f);
 +            setWillNotDraw(false);
++        }
++
++        @Override
++        protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight)
++        {
++            super.onSizeChanged(width, height, oldWidth, oldHeight);
++            float radius = Math.max(width, height) * 0.78f;
++            mVignettePaint.setShader(new android.graphics.RadialGradient(
++                width / 2f, height / 2f, radius,
++                new int[] { 0x00000000, 0x4A000000 }, null,
++                android.graphics.Shader.TileMode.CLAMP));
 +        }
 +
 +        @Override
@@ -837,8 +873,12 @@ index be544a2..9103e49 100644
 +            super.onDraw(canvas);
 +            int width = getWidth();
 +            int height = getHeight();
-+            for (int y = 1; y < height; y += 4)
++            for (int y = 1; y < height; y += 3) {
 +                canvas.drawRect(0, y, width, y + 1, mScanlinePaint);
++                if ((y % 9) == 1)
++                    canvas.drawRect(0, y + 1, width, y + 2, mPhosphorPaint);
++            }
++            canvas.drawRect(0, 0, width, height, mVignettePaint);
 +            canvas.drawRect(0, 0, width, height, mEdgePaint);
 +        }
 +    }
@@ -846,7 +886,7 @@ index be544a2..9103e49 100644
      /**
       * This static method is used in native mkxp-z. (see systemImpl.cpp)
       * This method returns a string of current device locale tag. (e.g. "en_US")
-@@ -488,6 +1029,7 @@ public class MainActivity extends SDLActivity
+@@ -488,6 +1069,7 @@ public class MainActivity extends SDLActivity
          intent.setType("*/*");
          // .rxdata/.rvdata files have no standard MIME type.
          intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
@@ -854,7 +894,7 @@ index be544a2..9103e49 100644
              "application/octet-stream",
              "application/x-rpgmaker"
          });
-@@ -496,15 +1038,26 @@ public class MainActivity extends SDLActivity
+@@ -496,15 +1078,26 @@ public class MainActivity extends SDLActivity
      }
  
      /**
@@ -884,7 +924,7 @@ index be544a2..9103e49 100644
      /**
       * The directories where the game may keep its save files. RPG Maker's
       * {@code save_data} writes into the game folder, but games that use
-@@ -549,64 +1102,104 @@ public class MainActivity extends SDLActivity
+@@ -549,64 +1142,104 @@ public class MainActivity extends SDLActivity
          final File[] roots = saveRoots();
  
          new Thread(() -> {
@@ -909,11 +949,11 @@ index be544a2..9103e49 100644
  
 -                if (imported == 0) {
 +                if (error != null) {
-                     Toast.makeText(MainActivity.this,
--                        "No save files were imported", Toast.LENGTH_LONG).show();
++                    Toast.makeText(MainActivity.this,
 +                        "Falha ao importar: " + error, Toast.LENGTH_LONG).show();
 +                } else if (imported == 0) {
-+                    Toast.makeText(MainActivity.this,
+                     Toast.makeText(MainActivity.this,
+-                        "No save files were imported", Toast.LENGTH_LONG).show();
 +                        "Nenhum save foi importado", Toast.LENGTH_LONG).show();
                  } else {
                      Toast.makeText(MainActivity.this,
@@ -1015,7 +1055,7 @@ index be544a2..9103e49 100644
      }
  
      /**
-@@ -681,6 +1274,116 @@ public class MainActivity extends SDLActivity
+@@ -681,6 +1314,116 @@ public class MainActivity extends SDLActivity
          }).start();
      }
  
@@ -1132,7 +1172,7 @@ index be544a2..9103e49 100644
      /**
       * Searches for the directory that actually contains a game, starting from
       * {@code root} and descending into its subdirectories.
-@@ -810,33 +1513,4 @@ public class MainActivity extends SDLActivity
+@@ -810,33 +1553,4 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
@@ -1731,7 +1771,7 @@ index fa96fbb..7ddd625 100644
          throws IOException
      {
 diff --git a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
-index 155e305..03548cc 100644
+index 155e305..3268289 100644
 --- a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
 +++ b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
 @@ -4,14 +4,17 @@ import android.content.Context;
@@ -1754,7 +1794,7 @@ index 155e305..03548cc 100644
  import android.widget.Switch;
  import android.widget.TextView;
  
-@@ -22,12 +25,23 @@ import com.mkxpz.R;
+@@ -22,12 +25,26 @@ import com.mkxpz.R;
   *
   * <p>The menu is kept as a set of sibling views added to the activity's
   * content {@link RelativeLayout}, so it does not require restructuring the
@@ -1773,6 +1813,9 @@ index 155e305..03548cc 100644
 +    public static final int FILTER_PIXEL = 0;
 +    public static final int FILTER_BILINEAR = 1;
 +    public static final int FILTER_CRT = 2;
++    public static final int FILTER_BICUBIC = 3;
++    public static final int FILTER_LANCZOS = 4;
++    public static final int FILTER_XBRZ = 5;
 +    public static final int MIN_GAME_AREA_SCALE = 100;
 +    public static final int MAX_GAME_AREA_SCALE = 250;
 +    public static final int DEFAULT_GAME_AREA_SCALE = 150;
@@ -1781,7 +1824,7 @@ index 155e305..03548cc 100644
      public interface OnLoadArchiveListener
      {
          void onLoadArchive();
-@@ -43,48 +57,107 @@ public class SideMenu
+@@ -43,48 +60,110 @@ public class SideMenu
          void onExportSaves();
      }
  
@@ -1858,6 +1901,9 @@ index 155e305..03548cc 100644
 +    private RadioButton mPixelFilterOption;
 +    private RadioButton mBilinearFilterOption;
 +    private RadioButton mCrtFilterOption;
++    private RadioButton mBicubicFilterOption;
++    private RadioButton mLanczosFilterOption;
++    private RadioButton mXbrzFilterOption;
  
      private final int mPanelWidth;
 -    private final int mHandleWidth;
@@ -1901,7 +1947,7 @@ index 155e305..03548cc 100644
  
          build();
          setOffset(-mPanelWidth);
-@@ -105,17 +178,122 @@ public class SideMenu
+@@ -105,17 +184,128 @@ public class SideMenu
          mOnExportSavesListener = listener;
      }
  
@@ -2017,6 +2063,12 @@ index 155e305..03548cc 100644
 +            mBilinearFilterOption.setChecked(true);
 +        else if (filter == FILTER_CRT)
 +            mCrtFilterOption.setChecked(true);
++        else if (filter == FILTER_BICUBIC)
++            mBicubicFilterOption.setChecked(true);
++        else if (filter == FILTER_LANCZOS)
++            mLanczosFilterOption.setChecked(true);
++        else if (filter == FILTER_XBRZ)
++            mXbrzFilterOption.setChecked(true);
 +        else
 +            mPixelFilterOption.setChecked(true);
 +    }
@@ -2024,11 +2076,13 @@ index 155e305..03548cc 100644
      public void setGamePath(String path)
      {
          if (mGamePathView != null)
-@@ -142,25 +320,40 @@ public class SideMenu
+@@ -141,30 +331,56 @@ public class SideMenu
+         // The panel itself.
          mPanel = new LinearLayout(mContext);
          mPanel.setOrientation(LinearLayout.VERTICAL);
-         mPanel.setBackgroundColor(Color.rgb(22, 22, 22));
+-        mPanel.setBackgroundColor(Color.rgb(22, 22, 22));
 -        mPanel.setPadding(dp(20), dp(24), dp(20), dp(24));
++        mPanel.setBackgroundColor(0xFF0D1422);
 +        mPanel.setClickable(true);
  
          RelativeLayout.LayoutParams panelLp = new RelativeLayout.LayoutParams(
@@ -2055,10 +2109,22 @@ index 155e305..03548cc 100644
 -        title.setText(R.string.app_name);
 +        title.setText(R.string.settings_title);
          title.setTextColor(Color.WHITE);
-         title.setTextSize(22f);
+-        title.setTextSize(22f);
++        title.setTextSize(24f);
          title.setTypeface(null, Typeface.BOLD);
 -        mPanel.addView(title);
 +        content.addView(title);
++
++        TextView brand = new TextView(mContext);
++        brand.setText(R.string.settings_brand);
++        brand.setTextColor(0xFF69D7E8);
++        brand.setTextSize(10f);
++        brand.setTypeface(null, Typeface.BOLD);
++        brand.setLetterSpacing(0.12f);
++        LinearLayout.LayoutParams brandLp = new LinearLayout.LayoutParams(
++            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++        brandLp.setMargins(0, dp(3), 0, dp(12));
++        content.addView(brand, brandLp);
  
          mGamePathView = new TextView(mContext);
          mGamePathView.setTextColor(0xB0FFFFFF);
@@ -2069,7 +2135,12 @@ index 155e305..03548cc 100644
  
          Button loadArchive = new Button(mContext);
          loadArchive.setText(R.string.load_archive);
-@@ -173,7 +366,140 @@ public class SideMenu
+-        loadArchive.setAllCaps(true);
++        styleActionButton(loadArchive, true);
+         LinearLayout.LayoutParams loadLp = new LinearLayout.LayoutParams(
+             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+         loadLp.setMargins(0, dp(24), 0, 0);
+@@ -173,11 +389,159 @@ public class SideMenu
              close();
              mOnLoadArchiveListener.onLoadArchive();
          });
@@ -2100,6 +2171,7 @@ index 155e305..03548cc 100644
 +            }
 +        });
 +        content.addView(mDisplayModeGroup);
++        styleCard(mDisplayModeGroup);
 +
 +        TextView displayHint = makeHint(R.string.display_restart_hint);
 +        content.addView(displayHint);
@@ -2158,18 +2230,31 @@ index 155e305..03548cc 100644
 +        mPixelFilterOption = makeRadioButton(R.string.filter_pixel);
 +        mBilinearFilterOption = makeRadioButton(R.string.filter_bilinear);
 +        mCrtFilterOption = makeRadioButton(R.string.filter_crt);
++        mBicubicFilterOption = makeRadioButton(R.string.filter_bicubic);
++        mLanczosFilterOption = makeRadioButton(R.string.filter_lanczos);
++        mXbrzFilterOption = makeRadioButton(R.string.filter_xbrz);
 +        mGraphicsFilterGroup.addView(mPixelFilterOption);
 +        mGraphicsFilterGroup.addView(mBilinearFilterOption);
 +        mGraphicsFilterGroup.addView(mCrtFilterOption);
++        mGraphicsFilterGroup.addView(mBicubicFilterOption);
++        mGraphicsFilterGroup.addView(mLanczosFilterOption);
++        mGraphicsFilterGroup.addView(mXbrzFilterOption);
 +        mGraphicsFilterGroup.setOnCheckedChangeListener((group, checkedId) -> {
 +            if (checkedId == mBilinearFilterOption.getId())
 +                mOnGraphicsFilterChangeListener.onGraphicsFilterChange(FILTER_BILINEAR);
 +            else if (checkedId == mCrtFilterOption.getId())
 +                mOnGraphicsFilterChangeListener.onGraphicsFilterChange(FILTER_CRT);
++            else if (checkedId == mBicubicFilterOption.getId())
++                mOnGraphicsFilterChangeListener.onGraphicsFilterChange(FILTER_BICUBIC);
++            else if (checkedId == mLanczosFilterOption.getId())
++                mOnGraphicsFilterChangeListener.onGraphicsFilterChange(FILTER_LANCZOS);
++            else if (checkedId == mXbrzFilterOption.getId())
++                mOnGraphicsFilterChangeListener.onGraphicsFilterChange(FILTER_XBRZ);
 +            else if (checkedId == mPixelFilterOption.getId())
 +                mOnGraphicsFilterChangeListener.onGraphicsFilterChange(FILTER_PIXEL);
 +        });
 +        content.addView(mGraphicsFilterGroup);
++        styleCard(mGraphicsFilterGroup);
 +
 +        TextView filterHint = makeHint(R.string.graphics_filter_restart_hint);
 +        content.addView(filterHint);
@@ -2183,6 +2268,7 @@ index 155e305..03548cc 100644
 +
 +        Button editControls = new Button(mContext);
 +        editControls.setText(R.string.edit_touch_controls);
++        styleActionButton(editControls, false);
 +        editControls.setOnClickListener(v -> {
 +            close();
 +            mOnEditControlsListener.onEditControls();
@@ -2211,7 +2297,12 @@ index 155e305..03548cc 100644
  
          Button importSaves = new Button(mContext);
          importSaves.setText(R.string.import_saves);
-@@ -186,7 +512,7 @@ public class SideMenu
+-        importSaves.setAllCaps(true);
++        styleActionButton(importSaves, false);
+         LinearLayout.LayoutParams importLp = new LinearLayout.LayoutParams(
+             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+         importLp.setMargins(0, dp(12), 0, 0);
+@@ -186,11 +550,11 @@ public class SideMenu
              close();
              mOnImportSavesListener.onImportSaves();
          });
@@ -2220,7 +2311,12 @@ index 155e305..03548cc 100644
  
          Button exportSaves = new Button(mContext);
          exportSaves.setText(R.string.export_saves);
-@@ -199,112 +525,124 @@ public class SideMenu
+-        exportSaves.setAllCaps(true);
++        styleActionButton(exportSaves, false);
+         LinearLayout.LayoutParams exportLp = new LinearLayout.LayoutParams(
+             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+         exportLp.setMargins(0, dp(12), 0, 0);
+@@ -199,112 +563,182 @@ public class SideMenu
              close();
              mOnExportSavesListener.onExportSaves();
          });
@@ -2236,6 +2332,7 @@ index 155e305..03548cc 100644
 -        mFpsToggle.setLayoutParams(fpsLp);
 +        Button exportErrorReport = new Button(mContext);
 +        exportErrorReport.setText(R.string.export_error_report);
++        styleActionButton(exportErrorReport, false);
 +        exportErrorReport.setOnClickListener(v -> {
 +            close();
 +            mOnExportErrorReportListener.onExportErrorReport();
@@ -2248,20 +2345,6 @@ index 155e305..03548cc 100644
          mFpsToggle.setOnCheckedChangeListener((buttonView, isChecked) ->
              mOnFpsOverlayToggleListener.onFpsOverlayToggle(isChecked));
 -        mPanel.addView(mFpsToggle);
--
--        // Grab handle: a thin strip at the left edge. Kept mostly transparent
--        // and only revealed transiently so it doesn't intrude on the game.
--        mHandle = new View(mContext);
--        mHandle.setBackground(makeHandleDrawable());
--        mHandle.setClickable(true);
--        RelativeLayout.LayoutParams handleLp = new RelativeLayout.LayoutParams(
--            mHandleWidth, dp(96));
--        handleLp.addRule(RelativeLayout.ALIGN_PARENT_START);
--        handleLp.addRule(RelativeLayout.CENTER_VERTICAL);
--        mRoot.addView(mHandle, handleLp);
--        mHandle.setOnTouchListener(this::onHandleTouch);
--        mHandle.setVisibility(View.INVISIBLE);
--        mHandle.setAlpha(0f);
 +        content.addView(mFpsToggle);
 +
 +        // Explicit settings button. Keeping it in the upper-left avoids the
@@ -2269,7 +2352,7 @@ index 155e305..03548cc 100644
 +        mConfigButton = new TextView(mContext);
 +        mConfigButton.setText("\u2699");
 +        mConfigButton.setContentDescription(mContext.getString(R.string.open_settings));
-+        mConfigButton.setTextColor(Color.WHITE);
++        mConfigButton.setTextColor(0xFF69D7E8);
 +        mConfigButton.setTextSize(24f);
 +        mConfigButton.setGravity(Gravity.CENTER);
 +        mConfigButton.setTypeface(null, Typeface.BOLD);
@@ -2284,26 +2367,69 @@ index 155e305..03548cc 100644
 +        configLp.addRule(RelativeLayout.ALIGN_PARENT_TOP);
 +        configLp.setMargins(dp(8), dp(8), 0, 0);
 +        mRoot.addView(mConfigButton, configLp);
++    }
+ 
+-        // Grab handle: a thin strip at the left edge. Kept mostly transparent
+-        // and only revealed transiently so it doesn't intrude on the game.
+-        mHandle = new View(mContext);
+-        mHandle.setBackground(makeHandleDrawable());
+-        mHandle.setClickable(true);
+-        RelativeLayout.LayoutParams handleLp = new RelativeLayout.LayoutParams(
+-            mHandleWidth, dp(96));
+-        handleLp.addRule(RelativeLayout.ALIGN_PARENT_START);
+-        handleLp.addRule(RelativeLayout.CENTER_VERTICAL);
+-        mRoot.addView(mHandle, handleLp);
+-        mHandle.setOnTouchListener(this::onHandleTouch);
+-        mHandle.setVisibility(View.INVISIBLE);
+-        mHandle.setAlpha(0f);
++    private void addSectionHeader(LinearLayout content, int textResource)
++    {
++        LinearLayout row = new LinearLayout(mContext);
++        row.setOrientation(LinearLayout.HORIZONTAL);
++        row.setGravity(Gravity.CENTER_VERTICAL);
++        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
++            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++        rowLp.setMargins(0, dp(24), 0, dp(9));
++        row.setLayoutParams(rowLp);
++
++        View accent = new View(mContext);
++        GradientDrawable accentBackground = new GradientDrawable();
++        accentBackground.setColor(0xFFFFD166);
++        accentBackground.setCornerRadius(dp(2));
++        accent.setBackground(accentBackground);
++        row.addView(accent, new LinearLayout.LayoutParams(dp(4), dp(18)));
++
++        TextView header = new TextView(mContext);
++        header.setText(textResource);
++        header.setTextColor(0xFFE8F0FA);
++        header.setTextSize(13f);
++        header.setTypeface(null, Typeface.BOLD);
++        header.setAllCaps(true);
++        header.setLetterSpacing(0.06f);
++        LinearLayout.LayoutParams headerLp = new LinearLayout.LayoutParams(
++            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++        headerLp.setMargins(dp(9), 0, 0, 0);
++        row.addView(header, headerLp);
++        content.addView(row);
      }
  
 -    private GradientDrawable makeHandleDrawable()
-+    private void addSectionHeader(LinearLayout content, int textResource)
++    private RadioButton makeRadioButton(int textResource)
      {
 -        GradientDrawable d = new GradientDrawable();
 -        d.setColor(0x33202020);
 -        d.setCornerRadius(dp(7));
 -        return d;
-+        TextView header = new TextView(mContext);
-+        header.setText(textResource);
-+        header.setTextColor(0xFF80CBC4);
-+        header.setTextSize(14f);
-+        header.setTypeface(null, Typeface.BOLD);
-+        header.setAllCaps(true);
-+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-+        lp.setMargins(0, dp(24), 0, dp(8));
-+        header.setLayoutParams(lp);
-+        content.addView(header);
++        RadioButton option = new RadioButton(mContext);
++        option.setId(View.generateViewId());
++        option.setText(textResource);
++        option.setTextColor(Color.WHITE);
++        option.setTextSize(14f);
++        option.setMinHeight(dp(46));
++        option.setPadding(dp(12), 0, dp(10), 0);
++        if (android.os.Build.VERSION.SDK_INT >= 21)
++            option.setButtonTintList(android.content.res.ColorStateList.valueOf(0xFF69D7E8));
++        return option;
      }
  
 -    /**
@@ -2311,26 +2437,6 @@ index 155e305..03548cc 100644
 -     * out again after {@link #HANDLE_REVEAL_DURATION_MS}.
 -     */
 -    public void revealHandle()
-+    private RadioButton makeRadioButton(int textResource)
-     {
--        if (mHandle == null)
--            return;
--
--        mHandle.removeCallbacks(mHideHandleRunnable);
--        mHandle.animate().cancel();
--        mHandle.setVisibility(View.VISIBLE);
--        mHandle.setAlpha(1f);
--        mHandle.postDelayed(mHideHandleRunnable, HANDLE_REVEAL_DURATION_MS);
-+        RadioButton option = new RadioButton(mContext);
-+        option.setId(View.generateViewId());
-+        option.setText(textResource);
-+        option.setTextColor(Color.WHITE);
-+        option.setTextSize(15f);
-+        option.setMinHeight(dp(44));
-+        return option;
-     }
- 
--    private void hideHandle()
 +    private Switch makeSwitch(int textResource)
      {
 -        if (mHandle == null)
@@ -2338,11 +2444,56 @@ index 155e305..03548cc 100644
 +        Switch toggle = new Switch(mContext);
 +        toggle.setText(textResource);
 +        toggle.setTextColor(Color.WHITE);
-+        toggle.setTextSize(15f);
-+        toggle.setMinHeight(dp(48));
-+        toggle.setLayoutParams(new LinearLayout.LayoutParams(
-+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
++        toggle.setTextSize(14f);
++        toggle.setMinHeight(dp(52));
++        toggle.setPadding(dp(12), dp(4), dp(8), dp(4));
++        GradientDrawable rowBackground = new GradientDrawable();
++        rowBackground.setColor(0xFF172235);
++        rowBackground.setCornerRadius(dp(12));
++        rowBackground.setStroke(dp(1), 0xFF25344A);
++        toggle.setBackground(rowBackground);
++        if (android.os.Build.VERSION.SDK_INT >= 21) {
++            toggle.setThumbTintList(android.content.res.ColorStateList.valueOf(0xFFF4F7FB));
++            toggle.setTrackTintList(android.content.res.ColorStateList.valueOf(0xFF426176));
++        }
++        LinearLayout.LayoutParams toggleLp = new LinearLayout.LayoutParams(
++            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++        toggleLp.setMargins(0, dp(4), 0, dp(4));
++        toggle.setLayoutParams(toggleLp);
 +        return toggle;
++    }
+ 
+-        mHandle.removeCallbacks(mHideHandleRunnable);
+-        mHandle.animate().cancel();
+-        mHandle.setVisibility(View.VISIBLE);
+-        mHandle.setAlpha(1f);
+-        mHandle.postDelayed(mHideHandleRunnable, HANDLE_REVEAL_DURATION_MS);
++    private void styleCard(View view)
++    {
++        GradientDrawable card = new GradientDrawable();
++        card.setColor(0xFF121C2B);
++        card.setCornerRadius(dp(14));
++        card.setStroke(dp(1), 0xFF24334A);
++        view.setBackground(card);
++        view.setPadding(dp(8), dp(8), dp(8), dp(8));
+     }
+ 
+-    private void hideHandle()
++    private void styleActionButton(Button button, boolean primary)
+     {
+-        if (mHandle == null)
+-            return;
++        button.setAllCaps(false);
++        button.setTextColor(primary ? 0xFF071621 : 0xFFEAF4FF);
++        button.setTextSize(14f);
++        button.setTypeface(null, Typeface.BOLD);
++        button.setMinHeight(dp(48));
++        GradientDrawable background = new GradientDrawable();
++        background.setColor(primary ? 0xFF69D7E8 : 0xFF172235);
++        background.setCornerRadius(dp(13));
++        background.setStroke(dp(1), primary ? 0xFF9CEAF3 : 0xFF2B3B52);
++        button.setBackground(background);
++        button.setElevation(dp(2));
 +    }
  
 -        mHandle.animate()
@@ -2422,14 +2573,15 @@ index 155e305..03548cc 100644
      {
 -        return Math.max(min, Math.min(max, value));
 +        GradientDrawable d = new GradientDrawable();
-+        d.setColor(0xCC202020);
-+        d.setStroke(dp(1), 0x88FFFFFF);
++        d.setColors(new int[] { 0xFF203754, 0xFF101725 });
++        d.setOrientation(GradientDrawable.Orientation.TL_BR);
++        d.setStroke(dp(1), 0xFF69D7E8);
 +        d.setCornerRadius(dp(22));
 +        return d;
      }
  
      private void setOffset(float offset)
-@@ -323,7 +661,7 @@ public class SideMenu
+@@ -323,7 +757,7 @@ public class SideMenu
      public void open()
      {
          mOpen = true;
@@ -2438,7 +2590,7 @@ index 155e305..03548cc 100644
          mPanel.setVisibility(View.VISIBLE);
          mScrim.setVisibility(View.VISIBLE);
          animateTo(0f);
-@@ -333,8 +671,7 @@ public class SideMenu
+@@ -333,8 +767,7 @@ public class SideMenu
      {
          mOpen = false;
          animateTo(-mPanelWidth);
@@ -2546,10 +2698,10 @@ index 7c821a4..c5f9920 100644
      public static void captureClose() {
          if (mAudioRecord != null) {
 diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
-index 9e37fed..03f6207 100644
+index 9e37fed..a68f3fd 100644
 --- a/android/app/src/main/res/values/strings.xml
 +++ b/android/app/src/main/res/values/strings.xml
-@@ -1,11 +1,48 @@
+@@ -1,11 +1,52 @@
  <?xml version="1.0" encoding="utf-8"?>
  <resources>
      <!-- Main application name -->
@@ -2567,6 +2719,7 @@ index 9e37fed..03f6207 100644
 +    <string name="export_error_report">Exportar relatório de erro</string>
 +    <string name="show_fps">Mostrar FPS</string>
 +    <string name="settings_title">Configurações</string>
++    <string name="settings_brand">POKÉMON NORDELUNA  •  ANDROID</string>
 +    <string name="open_settings">Abrir configurações</string>
 +    <string name="section_screen">Tela</string>
 +    <string name="section_controls">Controles</string>
@@ -2588,7 +2741,10 @@ index 9e37fed..03f6207 100644
 +    <string name="filter_pixel">Pixels nítidos</string>
 +    <string name="filter_bilinear">Bilinear suave</string>
 +    <string name="filter_crt">CRT (scanlines)</string>
-+    <string name="graphics_filter_restart_hint">A troca de filtro exige reiniciar o jogo.</string>
++    <string name="filter_bicubic">Bicúbico (suave)</string>
++    <string name="filter_lanczos">Lanczos3 (detalhado)</string>
++    <string name="filter_xbrz">xBRZ (pixel art)</string>
++    <string name="graphics_filter_restart_hint">Interpolação nativa do motor. A troca exige reiniciar o jogo; xBRZ pode exigir mais do aparelho.</string>
 +    <string name="filter_restart_title">Aplicar filtro gráfico?</string>
 +    <string name="filter_restart_message">Salve seu progresso antes de continuar. O jogo será reiniciado para aplicar o filtro.</string>
 +    <string name="filter_restarting">Aplicando filtro gráfico…</string>
@@ -2600,6 +2756,6 @@ index 9e37fed..03f6207 100644
 +    <string name="mix_external_audio">Permitir música de outros aplicativos</string>
 +    <string name="mix_external_audio_hint">Ativado por padrão: Spotify, YouTube Music e outros podem tocar junto com o jogo.</string>
 +    <string name="whats_new_title">Novidades da versão %1$s</string>
-+    <string name="whats_new_message">• Opção para tocar áudio junto com Spotify, YouTube Music e outros aplicativos.\n\n• Correção do botão de silenciar: o áudio SDL é silenciado diretamente.\n\n• Editor para arrastar, redimensionar e ajustar a transparência dos controles.\n\n• Vibração opcional nos controles.\n\n• Exportação e importação de saves em ZIP com metadados e backup antes de importar.\n\n• Relatório de erro exportável com informações do aparelho e logs.\n\n• Atualização do jogo Nordeluna.</string>
++    <string name="whats_new_message">• Filtros nativos bicúbico, Lanczos3 e xBRZ, além de Pixel e Bilinear. CRT com scanlines mais visíveis.\n\n• Painel de configurações redesenhado em azul noturno.\n\n• Opção para tocar áudio junto com Spotify, YouTube Music e outros aplicativos.\n\n• Correção do botão de silenciar: o áudio SDL é silenciado diretamente.\n\n• Editor para arrastar, redimensionar e ajustar a transparência dos controles; vibração opcional.\n\n• Exportação e importação de saves em ZIP com backup; relatório de erro exportável.\n\n• Atualização do jogo Nordeluna.</string>
 +    <string name="got_it">Entendi</string>
  </resources>
