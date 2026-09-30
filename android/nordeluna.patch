@@ -87,7 +87,7 @@ index a90712f..21d92e7 100644
      </application>
  </manifest>
 diff --git a/android/app/src/main/java/com/mkxpz/MainActivity.java b/android/app/src/main/java/com/mkxpz/MainActivity.java
-index be544a2..861d9c6 100644
+index be544a2..9103e49 100644
 --- a/android/app/src/main/java/com/mkxpz/MainActivity.java
 +++ b/android/app/src/main/java/com/mkxpz/MainActivity.java
 @@ -3,6 +3,7 @@ package com.mkxpz;
@@ -150,7 +150,7 @@ index be544a2..861d9c6 100644
  
  public class MainActivity extends SDLActivity
  {
-@@ -65,10 +76,20 @@ public class MainActivity extends SDLActivity
+@@ -65,10 +76,21 @@ public class MainActivity extends SDLActivity
  
      private static final String PREFS_NAME = "mkxpz_prefs";
      private static final String PREFS_GAME_PATH = "game_path";
@@ -159,6 +159,7 @@ index be544a2..861d9c6 100644
      private static final String PREFS_FPS_OVERLAY = "fps_overlay_enabled";
 +    private static final String PREFS_DISPLAY_MODE = "display_mode";
 +    private static final String PREFS_AUDIO_MUTED = "audio_muted";
++    private static final String PREFS_MIX_EXTERNAL_AUDIO = "mix_external_audio";
 +    private static final String PREFS_TOUCH_CONTROLS = "touch_controls_enabled";
 +    private static final String PREFS_CONTROL_HAPTICS = "control_haptics_enabled";
 +    private static final String PREFS_GAME_AREA_SCALE = "game_area_scale";
@@ -171,11 +172,12 @@ index be544a2..861d9c6 100644
  
      protected boolean mStarted = false;
  
-@@ -87,19 +108,62 @@ public class MainActivity extends SDLActivity
+@@ -87,19 +109,63 @@ public class MainActivity extends SDLActivity
      // In-screen gamepad
      private final Gamepad mGamepad = new Gamepad();
      private boolean mGamepadInvisible = false;
 +    private boolean mTouchControlsEnabled = true;
++    private boolean mMixExternalAudio = true;
 +    private boolean mBundledInstallInProgress = false;
 +    private FrameLayout mGameSurfaceContainer;
 +    private CrtOverlayView mCrtOverlay;
@@ -236,7 +238,7 @@ index be544a2..861d9c6 100644
  
          // Run (resume) native SDL thread
          if (mHasMultiWindow) {
-@@ -153,6 +217,9 @@ public class MainActivity extends SDLActivity
+@@ -153,6 +219,9 @@ public class MainActivity extends SDLActivity
              if (resultCode == RESULT_OK && data != null && data.getData() != null) {
                  exportSaves(data.getData());
              }
@@ -246,13 +248,14 @@ index be544a2..861d9c6 100644
          }
      }
  
-@@ -176,8 +243,26 @@ public class MainActivity extends SDLActivity
+@@ -176,8 +245,27 @@ public class MainActivity extends SDLActivity
          GAME_PATH_DEFAULT = new File(gameRootBase, "mkxp-z").getAbsolutePath();
          GAME_PATH = GAME_PATH_DEFAULT;
  
 +        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 +        mTouchControlsEnabled = prefs.getBoolean(PREFS_TOUCH_CONTROLS, true);
 +        boolean audioMuted = prefs.getBoolean(PREFS_AUDIO_MUTED, false);
++        mMixExternalAudio = prefs.getBoolean(PREFS_MIX_EXTERNAL_AUDIO, true);
 +        boolean controlHaptics = prefs.getBoolean(PREFS_CONTROL_HAPTICS, true);
 +        int displayMode = prefs.getInt(PREFS_DISPLAY_MODE, SideMenu.DISPLAY_KEEP_ASPECT);
 +        int gameAreaScale = prefs.getInt(
@@ -273,7 +276,7 @@ index be544a2..861d9c6 100644
          mStorageManager = (StorageManager) getSystemService(STORAGE_SERVICE);
          mVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
  
-@@ -196,9 +281,10 @@ public class MainActivity extends SDLActivity
+@@ -196,9 +284,10 @@ public class MainActivity extends SDLActivity
          }
  
          // Setup in-screen gamepad
@@ -285,7 +288,7 @@ index be544a2..861d9c6 100644
          mGamepad.setOnKeyDownListener(SDLActivity::onNativeKeyDown);
          mGamepad.setOnKeyUpListener(SDLActivity::onNativeKeyUp);
  
-@@ -206,7 +292,7 @@ public class MainActivity extends SDLActivity
+@@ -206,7 +295,7 @@ public class MainActivity extends SDLActivity
              mGamepad.attachTo(this, mLayout);
          }
  
@@ -294,7 +297,7 @@ index be544a2..861d9c6 100644
          tvFps = new TextView(this);
          tvFps.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
          tvFps.setTextColor(Color.WHITE);
-@@ -220,14 +306,16 @@ public class MainActivity extends SDLActivity
+@@ -220,14 +309,16 @@ public class MainActivity extends SDLActivity
          tvFps.setPadding(dpPx(10), dpPx(4), dpPx(10), dpPx(4));
          tvFps.setVisibility(View.GONE);
  
@@ -314,7 +317,7 @@ index be544a2..861d9c6 100644
          String savedGamePath = prefs.getString(PREFS_GAME_PATH, null);
          if (savedGamePath != null && new File(savedGamePath).isDirectory()) {
              GAME_PATH = savedGamePath;
-@@ -240,13 +328,24 @@ public class MainActivity extends SDLActivity
+@@ -240,13 +331,26 @@ public class MainActivity extends SDLActivity
          mSideMenu = new SideMenu(this, mLayout);
          mSideMenu.setGamePath(GAME_PATH);
          mSideMenu.setFpsOverlayEnabled(fpsOverlayEnabled);
@@ -322,6 +325,7 @@ index be544a2..861d9c6 100644
 +        mSideMenu.setGameAreaScale(gameAreaScale);
 +        mSideMenu.setGraphicsFilter(graphicsFilter);
 +        mSideMenu.setMuted(audioMuted);
++        mSideMenu.setExternalAudioMixEnabled(mMixExternalAudio);
 +        mSideMenu.setTouchControlsEnabled(mTouchControlsEnabled);
 +        mSideMenu.setHapticsEnabled(controlHaptics);
          mSideMenu.setOnFpsOverlayToggleListener(this::setFpsOverlayEnabled);
@@ -329,6 +333,7 @@ index be544a2..861d9c6 100644
 +        mSideMenu.setOnGameAreaScaleChangeListener(this::setGameAreaScale);
 +        mSideMenu.setOnGraphicsFilterChangeListener(this::setGraphicsFilter);
 +        mSideMenu.setOnMuteToggleListener(this::setAudioMuted);
++        mSideMenu.setOnExternalAudioMixToggleListener(this::setExternalAudioMixEnabled);
 +        mSideMenu.setOnTouchControlsToggleListener(this::setTouchControlsEnabled);
 +        mSideMenu.setOnEditControlsListener(mGamepad::startLayoutEditor);
 +        mSideMenu.setOnHapticsToggleListener(this::setControlHapticsEnabled);
@@ -342,7 +347,7 @@ index be544a2..861d9c6 100644
      }
  
      @Override
-@@ -261,16 +360,16 @@ public class MainActivity extends SDLActivity
+@@ -261,16 +365,16 @@ public class MainActivity extends SDLActivity
  
                  // Try to mount main OBB file
                  mStorageManager.mountObb(OBB_MAIN_FILENAME, null, obbListener);
@@ -364,7 +369,7 @@ index be544a2..861d9c6 100644
              }
          } else {
              // onStart: Resume SDL thread
-@@ -278,9 +377,33 @@ public class MainActivity extends SDLActivity
+@@ -278,9 +382,33 @@ public class MainActivity extends SDLActivity
          }
      }
  
@@ -398,14 +403,17 @@ index be544a2..861d9c6 100644
          super.onDestroy();
  
          // HACK: Exiting the JVM (process) since Ruby does not like when we
-@@ -289,6 +412,83 @@ public class MainActivity extends SDLActivity
+@@ -289,6 +417,86 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
 +    @SuppressWarnings("deprecation")
 +    private void requestGameAudioFocus()
 +    {
-+        if (mAudioManager != null) {
++        // Don't claim Android audio focus when the player wants background
++        // music. The system can then mix SDL output with Spotify, YouTube
++        // Music and other media players instead of pausing them.
++        if (mAudioManager != null && !mMixExternalAudio) {
 +            mAudioManager.requestAudioFocus(mAudioFocusListener,
 +                AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
 +        }
@@ -482,7 +490,7 @@ index be544a2..861d9c6 100644
      @Override
      public boolean dispatchKeyEvent(KeyEvent evt)
      {
-@@ -315,11 +515,9 @@ public class MainActivity extends SDLActivity
+@@ -315,11 +523,9 @@ public class MainActivity extends SDLActivity
      @Override
      public boolean dispatchTouchEvent(MotionEvent evt)
      {
@@ -496,7 +504,7 @@ index be544a2..861d9c6 100644
              mGamepad.showView();
              mGamepadInvisible = false;
          }
-@@ -392,6 +590,327 @@ public class MainActivity extends SDLActivity
+@@ -392,6 +598,341 @@ public class MainActivity extends SDLActivity
              tvFps.setVisibility(View.GONE);
      }
  
@@ -507,6 +515,20 @@ index be544a2..861d9c6 100644
 +            .putBoolean(PREFS_AUDIO_MUTED, muted)
 +            .apply();
 +        SDLAudioManager.setMuted(muted);
++    }
++
++    private void setExternalAudioMixEnabled(boolean enabled)
++    {
++        mMixExternalAudio = enabled;
++        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
++            .edit()
++            .putBoolean(PREFS_MIX_EXTERNAL_AUDIO, enabled)
++            .apply();
++        if (enabled) {
++            abandonGameAudioFocus();
++        } else if (mActivityResumed) {
++            requestGameAudioFocus();
++        }
 +    }
 +
 +    private void setTouchControlsEnabled(boolean enabled)
@@ -824,7 +846,7 @@ index be544a2..861d9c6 100644
      /**
       * This static method is used in native mkxp-z. (see systemImpl.cpp)
       * This method returns a string of current device locale tag. (e.g. "en_US")
-@@ -488,6 +1007,7 @@ public class MainActivity extends SDLActivity
+@@ -488,6 +1029,7 @@ public class MainActivity extends SDLActivity
          intent.setType("*/*");
          // .rxdata/.rvdata files have no standard MIME type.
          intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
@@ -832,7 +854,7 @@ index be544a2..861d9c6 100644
              "application/octet-stream",
              "application/x-rpgmaker"
          });
-@@ -496,15 +1016,26 @@ public class MainActivity extends SDLActivity
+@@ -496,15 +1038,26 @@ public class MainActivity extends SDLActivity
      }
  
      /**
@@ -862,7 +884,7 @@ index be544a2..861d9c6 100644
      /**
       * The directories where the game may keep its save files. RPG Maker's
       * {@code save_data} writes into the game folder, but games that use
-@@ -549,64 +1080,104 @@ public class MainActivity extends SDLActivity
+@@ -549,64 +1102,104 @@ public class MainActivity extends SDLActivity
          final File[] roots = saveRoots();
  
          new Thread(() -> {
@@ -993,7 +1015,7 @@ index be544a2..861d9c6 100644
      }
  
      /**
-@@ -681,6 +1252,116 @@ public class MainActivity extends SDLActivity
+@@ -681,6 +1274,116 @@ public class MainActivity extends SDLActivity
          }).start();
      }
  
@@ -1110,7 +1132,7 @@ index be544a2..861d9c6 100644
      /**
       * Searches for the directory that actually contains a game, starting from
       * {@code root} and descending into its subdirectories.
-@@ -810,33 +1491,4 @@ public class MainActivity extends SDLActivity
+@@ -810,33 +1513,4 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
@@ -1709,7 +1731,7 @@ index fa96fbb..7ddd625 100644
          throws IOException
      {
 diff --git a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
-index 155e305..1595570 100644
+index 155e305..03548cc 100644
 --- a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
 +++ b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
 @@ -4,14 +4,17 @@ import android.content.Context;
@@ -1759,7 +1781,7 @@ index 155e305..1595570 100644
      public interface OnLoadArchiveListener
      {
          void onLoadArchive();
-@@ -43,48 +57,100 @@ public class SideMenu
+@@ -43,48 +57,107 @@ public class SideMenu
          void onExportSaves();
      }
  
@@ -1781,6 +1803,11 @@ index 155e305..1595570 100644
 +    public interface OnMuteToggleListener
 +    {
 +        void onMuteToggle(boolean muted);
++    }
++
++    public interface OnExternalAudioMixToggleListener
++    {
++        void onExternalAudioMixToggle(boolean enabled);
 +    }
 +
 +    public interface OnTouchControlsToggleListener
@@ -1818,6 +1845,7 @@ index 155e305..1595570 100644
      private TextView mGamePathView;
      private Switch mFpsToggle;
 +    private Switch mMuteToggle;
++    private Switch mExternalAudioMixToggle;
 +    private Switch mTouchControlsToggle;
 +    private Switch mHapticsToggle;
 +    private RadioGroup mDisplayModeGroup;
@@ -1843,6 +1871,7 @@ index 155e305..1595570 100644
      private OnFpsOverlayToggleListener mOnFpsOverlayToggleListener = enabled -> {};
 +    private OnDisplayModeChangeListener mOnDisplayModeChangeListener = mode -> {};
 +    private OnMuteToggleListener mOnMuteToggleListener = muted -> {};
++    private OnExternalAudioMixToggleListener mOnExternalAudioMixToggleListener = enabled -> {};
 +    private OnTouchControlsToggleListener mOnTouchControlsToggleListener = enabled -> {};
 +    private OnEditControlsListener mOnEditControlsListener = () -> {};
 +    private OnHapticsToggleListener mOnHapticsToggleListener = enabled -> {};
@@ -1872,7 +1901,7 @@ index 155e305..1595570 100644
  
          build();
          setOffset(-mPanelWidth);
-@@ -105,17 +171,111 @@ public class SideMenu
+@@ -105,17 +178,122 @@ public class SideMenu
          mOnExportSavesListener = listener;
      }
  
@@ -1894,6 +1923,11 @@ index 155e305..1595570 100644
 +    public void setOnMuteToggleListener(OnMuteToggleListener listener)
 +    {
 +        mOnMuteToggleListener = listener;
++    }
++
++    public void setOnExternalAudioMixToggleListener(OnExternalAudioMixToggleListener listener)
++    {
++        mOnExternalAudioMixToggleListener = listener;
 +    }
 +
 +    public void setOnTouchControlsToggleListener(OnTouchControlsToggleListener listener)
@@ -1931,6 +1965,12 @@ index 155e305..1595570 100644
 +    {
 +        if (mMuteToggle != null)
 +            mMuteToggle.setChecked(muted);
++    }
++
++    public void setExternalAudioMixEnabled(boolean enabled)
++    {
++        if (mExternalAudioMixToggle != null)
++            mExternalAudioMixToggle.setChecked(enabled);
 +    }
 +
 +    public void setTouchControlsEnabled(boolean enabled)
@@ -1984,7 +2024,7 @@ index 155e305..1595570 100644
      public void setGamePath(String path)
      {
          if (mGamePathView != null)
-@@ -142,25 +302,40 @@ public class SideMenu
+@@ -142,25 +320,40 @@ public class SideMenu
          mPanel = new LinearLayout(mContext);
          mPanel.setOrientation(LinearLayout.VERTICAL);
          mPanel.setBackgroundColor(Color.rgb(22, 22, 22));
@@ -2029,7 +2069,7 @@ index 155e305..1595570 100644
  
          Button loadArchive = new Button(mContext);
          loadArchive.setText(R.string.load_archive);
-@@ -173,7 +348,134 @@ public class SideMenu
+@@ -173,7 +366,140 @@ public class SideMenu
              close();
              mOnLoadArchiveListener.onLoadArchive();
          });
@@ -2161,11 +2201,17 @@ index 155e305..1595570 100644
 +            mOnMuteToggleListener.onMuteToggle(isChecked));
 +        content.addView(mMuteToggle);
 +
++        mExternalAudioMixToggle = makeSwitch(R.string.mix_external_audio);
++        mExternalAudioMixToggle.setOnCheckedChangeListener((buttonView, isChecked) ->
++            mOnExternalAudioMixToggleListener.onExternalAudioMixToggle(isChecked));
++        content.addView(mExternalAudioMixToggle);
++        content.addView(makeHint(R.string.mix_external_audio_hint));
++
 +        addSectionHeader(content, R.string.section_saves);
  
          Button importSaves = new Button(mContext);
          importSaves.setText(R.string.import_saves);
-@@ -186,7 +488,7 @@ public class SideMenu
+@@ -186,7 +512,7 @@ public class SideMenu
              close();
              mOnImportSavesListener.onImportSaves();
          });
@@ -2174,7 +2220,7 @@ index 155e305..1595570 100644
  
          Button exportSaves = new Button(mContext);
          exportSaves.setText(R.string.export_saves);
-@@ -199,112 +501,124 @@ public class SideMenu
+@@ -199,112 +525,124 @@ public class SideMenu
              close();
              mOnExportSavesListener.onExportSaves();
          });
@@ -2383,7 +2429,7 @@ index 155e305..1595570 100644
      }
  
      private void setOffset(float offset)
-@@ -323,7 +637,7 @@ public class SideMenu
+@@ -323,7 +661,7 @@ public class SideMenu
      public void open()
      {
          mOpen = true;
@@ -2392,7 +2438,7 @@ index 155e305..1595570 100644
          mPanel.setVisibility(View.VISIBLE);
          mScrim.setVisibility(View.VISIBLE);
          animateTo(0f);
-@@ -333,8 +647,7 @@ public class SideMenu
+@@ -333,8 +671,7 @@ public class SideMenu
      {
          mOpen = false;
          animateTo(-mPanelWidth);
@@ -2500,10 +2546,10 @@ index 7c821a4..c5f9920 100644
      public static void captureClose() {
          if (mAudioRecord != null) {
 diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
-index 9e37fed..9a83ce0 100644
+index 9e37fed..03f6207 100644
 --- a/android/app/src/main/res/values/strings.xml
 +++ b/android/app/src/main/res/values/strings.xml
-@@ -1,11 +1,46 @@
+@@ -1,11 +1,48 @@
  <?xml version="1.0" encoding="utf-8"?>
  <resources>
      <!-- Main application name -->
@@ -2551,7 +2597,9 @@ index 9e37fed..9a83ce0 100644
 +    <string name="edit_touch_controls">Editar layout dos controles</string>
 +    <string name="control_vibration">Vibração dos controles</string>
 +    <string name="mute_audio">Silenciar jogo</string>
++    <string name="mix_external_audio">Permitir música de outros aplicativos</string>
++    <string name="mix_external_audio_hint">Ativado por padrão: Spotify, YouTube Music e outros podem tocar junto com o jogo.</string>
 +    <string name="whats_new_title">Novidades da versão %1$s</string>
-+    <string name="whats_new_message">• Correção do botão de silenciar: o áudio SDL é silenciado diretamente.\n\n• Editor para arrastar, redimensionar e ajustar a transparência dos controles.\n\n• Vibração opcional nos controles.\n\n• Exportação e importação de saves em ZIP com metadados e backup antes de importar.\n\n• Relatório de erro exportável com informações do aparelho e logs.\n\n• Atualização do jogo Nordeluna.</string>
++    <string name="whats_new_message">• Opção para tocar áudio junto com Spotify, YouTube Music e outros aplicativos.\n\n• Correção do botão de silenciar: o áudio SDL é silenciado diretamente.\n\n• Editor para arrastar, redimensionar e ajustar a transparência dos controles.\n\n• Vibração opcional nos controles.\n\n• Exportação e importação de saves em ZIP com metadados e backup antes de importar.\n\n• Relatório de erro exportável com informações do aparelho e logs.\n\n• Atualização do jogo Nordeluna.</string>
 +    <string name="got_it">Entendi</string>
  </resources>
