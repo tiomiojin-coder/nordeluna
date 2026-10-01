@@ -91,7 +91,9 @@ def prepare_archive(input_path: Path, output_path: Path, config_path: Path) -> N
             )
 
         with zipfile.ZipFile(temporary_path, "r") as check:
-            check.testzip()
+            bad_file = check.testzip()
+            if bad_file is not None:
+                raise ValueError(f"corrupt file after repackaging: {bad_file}")
             entries = {
                 info.filename.removeprefix("./"): info for info in check.infolist()
             }
@@ -100,17 +102,16 @@ def prepare_archive(input_path: Path, output_path: Path, config_path: Path) -> N
                 raise ValueError("replacement character found after repackaging")
 
             required_assets = (
-                "Graphics/Pictures/Laboratório (Intro).png",
-                "Graphics/Tilesets/massapÊ.png",
-                "Graphics/Tilesets/SANTANA DO ACARAÚ.png",
-                "Graphics/Items/LANTERNA.png",
+                "Game.ini", "Data/Scripts.rxdata", "mkxp.json",
             )
             for name in required_assets:
                 if name not in entries:
                     raise ValueError(f"required Android asset is missing: {name}")
-                if any(ord(character) > 127 for character in name):
-                    if not entries[name].flag_bits & 0x800:
-                        raise ValueError(f"asset path is not flagged as UTF-8: {name}")
+            # Scene-specific graphics may be renamed or removed by updates.
+            # Validate every present Unicode path, not a fixed old asset list.
+            for name, entry in entries.items():
+                if any(ord(character) > 127 for character in name) and not entry.flag_bits & 0x800:
+                    raise ValueError(f"asset path is not flagged as UTF-8: {name}")
 
         os.replace(temporary_path, output_path)
     finally:

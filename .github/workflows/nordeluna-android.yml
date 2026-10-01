@@ -12,6 +12,7 @@ on:
       - scripts/prepare-android-archive.py
       - scripts/prepare-android-game.sh
       - scripts/pack-android-directory.py
+      - scripts/tests/**
 
 permissions:
   contents: read
@@ -36,6 +37,9 @@ jobs:
         with:
           distribution: temurin
           java-version: "11"
+
+      - name: Validate Android packaging scripts
+        run: python3 -m unittest discover -s scripts/tests -p 'test_android_archives.py'
 
       - name: Reconstruct private game archive
         run: |
