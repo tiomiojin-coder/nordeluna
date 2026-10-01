@@ -1,5 +1,5 @@
 diff --git a/android/app/build.gradle b/android/app/build.gradle
-index 036a159..eed0ab8 100644
+index 036a159..f4eee30 100644
 --- a/android/app/build.gradle
 +++ b/android/app/build.gradle
 @@ -7,12 +7,12 @@ android {
@@ -13,7 +13,7 @@ index 036a159..eed0ab8 100644
 -        versionCode 1
 -        versionName "0.1.0"
 -        archivesBaseName = "mkxp-z-$versionName"
-+        versionCode 11
++        versionCode 12
 +        versionName "1.8.0"
 +        archivesBaseName = "Nordeluna-Android-$versionName"
          // Native ABIs are produced by build.sh (see ../build.sh) and placed
@@ -94,8 +94,33 @@ index a90712f..d88f3bf 100644
 -        </activity-alias>
      </application>
  </manifest>
+diff --git a/android/app/src/main/java/com/mkxpz/GameSurfaceSize.java b/android/app/src/main/java/com/mkxpz/GameSurfaceSize.java
+new file mode 100644
+index 0000000..0ab7cff
+--- /dev/null
++++ b/android/app/src/main/java/com/mkxpz/GameSurfaceSize.java
+@@ -0,0 +1,19 @@
++package com.mkxpz;
++
++/** Presentation size in actual container pixels; RGSS remains 512 x 384. */
++final class GameSurfaceSize {
++    private GameSurfaceSize() { }
++
++    // Matches SideMenu DISPLAY_KEEP_ASPECT=0, FILL_SCREEN=1, ORIGINAL_SIZE=2.
++    static int[] calculate(int availableWidth, int availableHeight, int mode, int percent) {
++        if (availableWidth < 1 || availableHeight < 1)
++            throw new IllegalArgumentException("Surface container has not been measured");
++        if (mode == 1) return new int[] { availableWidth, availableHeight };
++        double scale = Math.min(availableWidth / 512.0, availableHeight / 384.0);
++        if (mode == 2) scale = Math.min(scale, Math.max(100, Math.min(250, percent)) / 100.0);
++        return new int[] {
++            Math.max(1, Math.min(availableWidth, (int) Math.round(512 * scale))),
++            Math.max(1, Math.min(availableHeight, (int) Math.round(384 * scale)))
++        };
++    }
++}
 diff --git a/android/app/src/main/java/com/mkxpz/MainActivity.java b/android/app/src/main/java/com/mkxpz/MainActivity.java
-index be544a2..0e9e5a7 100644
+index be544a2..a80dedc 100644
 --- a/android/app/src/main/java/com/mkxpz/MainActivity.java
 +++ b/android/app/src/main/java/com/mkxpz/MainActivity.java
 @@ -3,21 +3,31 @@ package com.mkxpz;
@@ -146,7 +171,7 @@ index be544a2..0e9e5a7 100644
  import android.util.Log;
  import android.util.TypedValue;
  import java.util.Locale;
-@@ -35,18 +51,27 @@ import java.util.ArrayList;
+@@ -35,18 +51,30 @@ import java.util.ArrayList;
  import java.util.List;
  import java.io.File;
  import java.io.FileInputStream;
@@ -165,6 +190,9 @@ index be544a2..0e9e5a7 100644
  import org.libsdl.app.SDLActivity;
 +import org.libsdl.app.SDLAudioManager;
 +import org.libsdl.app.SDLControllerManager;
++import org.json.JSONArray;
++import org.json.JSONException;
++import org.json.JSONObject;
  import com.mkxpz.gamepad.Gamepad;
  import com.mkxpz.gamepad.GamepadConfig;
  import com.mkxpz.launcher.SideMenu;
@@ -174,11 +202,12 @@ index be544a2..0e9e5a7 100644
  
  public class MainActivity extends SDLActivity
  {
-@@ -65,10 +90,23 @@ public class MainActivity extends SDLActivity
+@@ -65,10 +93,24 @@ public class MainActivity extends SDLActivity
  
      private static final String PREFS_NAME = "mkxpz_prefs";
      private static final String PREFS_GAME_PATH = "game_path";
 +    private static final String BUNDLED_GAME_ASSET = "nordeluna-game.zip";
++    private static final String DISPLAY_PRELOAD_ASSET = "nordeluna-display.rb";
 +    private static final String PREFS_BUNDLED_VERSION = "bundled_game_version";
      private static final String PREFS_FPS_OVERLAY = "fps_overlay_enabled";
 +    private static final String PREFS_DISPLAY_MODE = "display_mode";
@@ -198,7 +227,7 @@ index be544a2..0e9e5a7 100644
  
      protected boolean mStarted = false;
  
-@@ -87,19 +125,68 @@ public class MainActivity extends SDLActivity
+@@ -87,19 +129,68 @@ public class MainActivity extends SDLActivity
      // In-screen gamepad
      private final Gamepad mGamepad = new Gamepad();
      private boolean mGamepadInvisible = false;
@@ -269,7 +298,7 @@ index be544a2..0e9e5a7 100644
  
          // Run (resume) native SDL thread
          if (mHasMultiWindow) {
-@@ -153,6 +240,9 @@ public class MainActivity extends SDLActivity
+@@ -153,6 +244,9 @@ public class MainActivity extends SDLActivity
              if (resultCode == RESULT_OK && data != null && data.getData() != null) {
                  exportSaves(data.getData());
              }
@@ -279,7 +308,7 @@ index be544a2..0e9e5a7 100644
          }
      }
  
-@@ -176,8 +266,28 @@ public class MainActivity extends SDLActivity
+@@ -176,8 +270,28 @@ public class MainActivity extends SDLActivity
          GAME_PATH_DEFAULT = new File(gameRootBase, "mkxp-z").getAbsolutePath();
          GAME_PATH = GAME_PATH_DEFAULT;
  
@@ -308,7 +337,7 @@ index be544a2..0e9e5a7 100644
          mStorageManager = (StorageManager) getSystemService(STORAGE_SERVICE);
          mVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
  
-@@ -196,9 +306,12 @@ public class MainActivity extends SDLActivity
+@@ -196,9 +310,12 @@ public class MainActivity extends SDLActivity
          }
  
          // Setup in-screen gamepad
@@ -322,7 +351,7 @@ index be544a2..0e9e5a7 100644
          mGamepad.setOnKeyDownListener(SDLActivity::onNativeKeyDown);
          mGamepad.setOnKeyUpListener(SDLActivity::onNativeKeyUp);
  
-@@ -206,7 +319,7 @@ public class MainActivity extends SDLActivity
+@@ -206,7 +323,7 @@ public class MainActivity extends SDLActivity
              mGamepad.attachTo(this, mLayout);
          }
  
@@ -331,7 +360,7 @@ index be544a2..0e9e5a7 100644
          tvFps = new TextView(this);
          tvFps.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
          tvFps.setTextColor(Color.WHITE);
-@@ -220,14 +333,16 @@ public class MainActivity extends SDLActivity
+@@ -220,14 +337,16 @@ public class MainActivity extends SDLActivity
          tvFps.setPadding(dpPx(10), dpPx(4), dpPx(10), dpPx(4));
          tvFps.setVisibility(View.GONE);
  
@@ -351,7 +380,7 @@ index be544a2..0e9e5a7 100644
          String savedGamePath = prefs.getString(PREFS_GAME_PATH, null);
          if (savedGamePath != null && new File(savedGamePath).isDirectory()) {
              GAME_PATH = savedGamePath;
-@@ -240,13 +355,30 @@ public class MainActivity extends SDLActivity
+@@ -240,13 +359,30 @@ public class MainActivity extends SDLActivity
          mSideMenu = new SideMenu(this, mLayout);
          mSideMenu.setGamePath(GAME_PATH);
          mSideMenu.setFpsOverlayEnabled(fpsOverlayEnabled);
@@ -385,7 +414,7 @@ index be544a2..0e9e5a7 100644
      }
  
      @Override
-@@ -261,16 +393,16 @@ public class MainActivity extends SDLActivity
+@@ -261,16 +397,16 @@ public class MainActivity extends SDLActivity
  
                  // Try to mount main OBB file
                  mStorageManager.mountObb(OBB_MAIN_FILENAME, null, obbListener);
@@ -407,7 +436,7 @@ index be544a2..0e9e5a7 100644
              }
          } else {
              // onStart: Resume SDL thread
-@@ -278,9 +410,33 @@ public class MainActivity extends SDLActivity
+@@ -278,9 +414,33 @@ public class MainActivity extends SDLActivity
          }
      }
  
@@ -441,7 +470,7 @@ index be544a2..0e9e5a7 100644
          super.onDestroy();
  
          // HACK: Exiting the JVM (process) since Ruby does not like when we
-@@ -289,9 +445,101 @@ public class MainActivity extends SDLActivity
+@@ -289,9 +449,101 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
@@ -543,7 +572,7 @@ index be544a2..0e9e5a7 100644
          if (
              evt.getKeyCode() != KeyEvent.KEYCODE_BACK &&
              evt.getKeyCode() != KeyEvent.KEYCODE_VOLUME_UP &&
-@@ -300,7 +548,7 @@ public class MainActivity extends SDLActivity
+@@ -300,7 +552,7 @@ public class MainActivity extends SDLActivity
              evt.getKeyCode() != KeyEvent.KEYCODE_HEADSETHOOK
          ) {
              // Hide gamepad view on key events when visible
@@ -552,7 +581,7 @@ index be544a2..0e9e5a7 100644
                  mGamepad.hideView();
                  mGamepadInvisible = true;
              }
-@@ -315,11 +563,9 @@ public class MainActivity extends SDLActivity
+@@ -315,11 +567,9 @@ public class MainActivity extends SDLActivity
      @Override
      public boolean dispatchTouchEvent(MotionEvent evt)
      {
@@ -566,7 +595,7 @@ index be544a2..0e9e5a7 100644
              mGamepad.showView();
              mGamepadInvisible = false;
          }
-@@ -330,12 +576,20 @@ public class MainActivity extends SDLActivity
+@@ -330,12 +580,20 @@ public class MainActivity extends SDLActivity
      @Override
      public boolean onGenericMotionEvent(MotionEvent evt)
      {
@@ -587,7 +616,7 @@ index be544a2..0e9e5a7 100644
      /**
       * This method is for arguments for launching native mkxp-z.
       *
-@@ -392,6 +646,571 @@ public class MainActivity extends SDLActivity
+@@ -392,6 +650,608 @@ public class MainActivity extends SDLActivity
              tvFps.setVisibility(View.GONE);
      }
  
@@ -992,6 +1021,36 @@ index be544a2..0e9e5a7 100644
 +        String json = setJsonBoolean(sb.toString(), "fixedAspectRatio", keepAspect);
 +        json = setJsonBoolean(json, "integerScalingActive", false);
 +        json = setJsonBoolean(json, "integerScalingLastMile", true);
++        json = setJsonBoolean(json, "fullscreen", true);
++
++        // Refresh from the APK even when bundled_game_version is unchanged:
++        // installing a corrected 1.8 must also repair existing installations.
++        try (InputStream in = getAssets().open(DISPLAY_PRELOAD_ASSET);
++             FileOutputStream out = new FileOutputStream(new File(GAME_PATH, DISPLAY_PRELOAD_ASSET))) {
++            byte[] buffer = new byte[4096];
++            int count;
++            while ((count = in.read(buffer)) != -1) out.write(buffer, 0, count);
++        } catch (IOException e) {
++            Log.e(TAG, "Could not install Android display compatibility script", e);
++            return false;
++        }
++        try {
++            JSONObject config = new JSONObject(json);
++            JSONArray existing = config.optJSONArray("preloadScript");
++            JSONArray preloads = new JSONArray();
++            preloads.put(DISPLAY_PRELOAD_ASSET);
++            if (existing != null) {
++                for (int i = 0; i < existing.length(); i++) {
++                    String path = existing.getString(i);
++                    if (!DISPLAY_PRELOAD_ASSET.equals(path)) preloads.put(path);
++                }
++            }
++            config.put("preloadScript", preloads);
++            json = config.toString(2);
++        } catch (JSONException e) {
++            Log.e(TAG, "Could not configure Android display preload", e);
++            return false;
++        }
 +
 +        try (FileOutputStream out = new FileOutputStream(configFile, false)) {
 +            out.write(json.getBytes(StandardCharsets.UTF_8));
@@ -1073,30 +1132,37 @@ index be544a2..0e9e5a7 100644
 +        mCrtOverlay.setClickable(false);
 +        mCrtOverlay.setFocusable(false);
 +        mGameSurfaceContainer.addView(mCrtOverlay);
++        mGameSurfaceContainer.addOnLayoutChangeListener((view, left, top, right, bottom,
++                oldLeft, oldTop, oldRight, oldBottom) -> {
++            if (right - left == oldRight - oldLeft && bottom - top == oldBottom - oldTop)
++                return;
++            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
++            applySurfaceLayoutMode(prefs.getInt(PREFS_DISPLAY_MODE, SideMenu.DISPLAY_KEEP_ASPECT),
++                prefs.getInt(PREFS_GAME_AREA_SCALE, SideMenu.DEFAULT_GAME_AREA_SCALE));
++        });
 +    }
 +
 +    private void applySurfaceLayoutMode(int mode, int areaScalePercent)
 +    {
-+        FrameLayout.LayoutParams surfaceParams;
-+        if (mode == SideMenu.DISPLAY_ORIGINAL_SIZE) {
-+            int availableWidth = getResources().getDisplayMetrics().widthPixels;
-+            int availableHeight = getResources().getDisplayMetrics().heightPixels;
-+            float requestedScale = Math.max(SideMenu.MIN_GAME_AREA_SCALE,
-+                Math.min(SideMenu.MAX_GAME_AREA_SCALE, areaScalePercent)) / 100f;
-+            float fittingScale = Math.min(availableWidth / 512f, availableHeight / 384f);
-+            float appliedScale = Math.min(requestedScale, fittingScale);
-+            int width = Math.max(1, Math.round(512f * appliedScale));
-+            int height = Math.max(1, Math.round(384f * appliedScale));
-+            surfaceParams = new FrameLayout.LayoutParams(width, height, Gravity.CENTER);
-+        } else {
-+            surfaceParams = new FrameLayout.LayoutParams(
-+                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.CENTER);
++        if (mGameSurfaceContainer == null) return;
++        // The measured container excludes system bars and respects multiwindow.
++        // DisplayMetrics can describe the whole display rather than this area.
++        int availableWidth = mGameSurfaceContainer.getWidth();
++        int availableHeight = mGameSurfaceContainer.getHeight();
++        if (availableWidth <= 0 || availableHeight <= 0) return;
++        int[] size = GameSurfaceSize.calculate(availableWidth, availableHeight, mode, areaScalePercent);
++        int width = size[0], height = size[1];
++        FrameLayout.LayoutParams surfaceParams = (FrameLayout.LayoutParams) mSurface.getLayoutParams();
++        if (surfaceParams.width != width || surfaceParams.height != height ||
++                surfaceParams.gravity != Gravity.CENTER) {
++            mSurface.setLayoutParams(new FrameLayout.LayoutParams(width, height, Gravity.CENTER));
 +        }
-+        mSurface.setLayoutParams(surfaceParams);
 +        if (mCrtOverlay != null) {
-+            FrameLayout.LayoutParams overlayParams = new FrameLayout.LayoutParams(
-+                surfaceParams.width, surfaceParams.height, Gravity.CENTER);
-+            mCrtOverlay.setLayoutParams(overlayParams);
++            FrameLayout.LayoutParams overlayParams = (FrameLayout.LayoutParams) mCrtOverlay.getLayoutParams();
++            if (overlayParams.width != width || overlayParams.height != height ||
++                    overlayParams.gravity != Gravity.CENTER) {
++                mCrtOverlay.setLayoutParams(new FrameLayout.LayoutParams(width, height, Gravity.CENTER));
++            }
 +        }
 +    }
 +
@@ -1159,7 +1225,7 @@ index be544a2..0e9e5a7 100644
      /**
       * This static method is used in native mkxp-z. (see systemImpl.cpp)
       * This method returns a string of current device locale tag. (e.g. "en_US")
-@@ -488,6 +1307,7 @@ public class MainActivity extends SDLActivity
+@@ -488,6 +1348,7 @@ public class MainActivity extends SDLActivity
          intent.setType("*/*");
          // .rxdata/.rvdata files have no standard MIME type.
          intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
@@ -1167,7 +1233,7 @@ index be544a2..0e9e5a7 100644
              "application/octet-stream",
              "application/x-rpgmaker"
          });
-@@ -496,15 +1316,26 @@ public class MainActivity extends SDLActivity
+@@ -496,15 +1357,26 @@ public class MainActivity extends SDLActivity
      }
  
      /**
@@ -1197,7 +1263,7 @@ index be544a2..0e9e5a7 100644
      /**
       * The directories where the game may keep its save files. RPG Maker's
       * {@code save_data} writes into the game folder, but games that use
-@@ -549,64 +1380,104 @@ public class MainActivity extends SDLActivity
+@@ -549,64 +1421,104 @@ public class MainActivity extends SDLActivity
          final File[] roots = saveRoots();
  
          new Thread(() -> {
@@ -1328,7 +1394,7 @@ index be544a2..0e9e5a7 100644
      }
  
      /**
-@@ -681,6 +1552,116 @@ public class MainActivity extends SDLActivity
+@@ -681,6 +1593,116 @@ public class MainActivity extends SDLActivity
          }).start();
      }
  
@@ -1445,7 +1511,7 @@ index be544a2..0e9e5a7 100644
      /**
       * Searches for the directory that actually contains a game, starting from
       * {@code root} and descending into its subdirectories.
-@@ -810,33 +1791,4 @@ public class MainActivity extends SDLActivity
+@@ -810,33 +1832,4 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
