@@ -20,7 +20,7 @@ env:
   MKXP_Z_COMMIT: 17a5ec6cb3e8d2de05a82451bc4910f36517d322
   REFERENCE_APK_URL: https://codeberg.org/warmwinter/mkxp-z/releases/download/uranium-android@0.2.0/uranium-0.2.0.apk
   REFERENCE_APK_SHA256: 4a520f7784f1f7e3493c9970da0748a483a0f88400627bcc6a705529c1407653
-  GAME_ARCHIVE_SHA256: 2090b9ff8bb0f6a7a118610c78aa733c5b06d22062d560e60852ee8af54755ae
+  GAME_ARCHIVE_SHA256: f0c81bd8366d4226f2a347e00e4d0ee289af35af7be5fa7aa1c74fcc76d6ce87
 
 jobs:
   build:
@@ -87,7 +87,7 @@ jobs:
           APP_MAIN=build-android/mkxp-z/android/app/src/main
           mkdir -p "$APP_MAIN/assets"
           cp build-android/nordeluna-game.zip "$APP_MAIN/assets/nordeluna-game.zip"
-          cp android/assets/nordeluna-appicon-1024-rgb.png \
+          cp android/assets/nordeluna-launcher.png \
             "$APP_MAIN/res/drawable/nordeluna_icon.png"
 
       - name: Build installable APK

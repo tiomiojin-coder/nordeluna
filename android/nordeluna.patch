@@ -47,10 +47,18 @@ index 036a159..eed0ab8 100644
 -}
 +// Native libraries are copied from the pinned upstream reference APK by CI.
 diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
-index a90712f..21d92e7 100644
+index a90712f..d88f3bf 100644
 --- a/android/app/src/main/AndroidManifest.xml
 +++ b/android/app/src/main/AndroidManifest.xml
-@@ -33,7 +33,7 @@
+@@ -6,6 +6,7 @@
+ 
+     <!-- Access to vibrator -->
+     <uses-permission android:name="android.permission.VIBRATE" />
++    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+ 
+     <!-- Android TV support -->
+     <uses-feature android:name="android.software.leanback" android:required="false" />
+@@ -33,7 +34,7 @@
  
      <application
          android:label="@string/app_name"
@@ -59,7 +67,7 @@ index a90712f..21d92e7 100644
          android:theme="@style/AppTheme"
          android:appCategory="game"
          android:isGame="true"
-@@ -44,8 +44,8 @@
+@@ -44,8 +45,8 @@
      >
          <!-- Main activity -->
          <activity
@@ -70,7 +78,7 @@ index a90712f..21d92e7 100644
              android:launchMode="singleTop"
              android:alwaysRetainTaskState="true"
              android:screenOrientation="sensorLandscape"
-@@ -72,15 +72,5 @@
+@@ -72,15 +73,5 @@
              <meta-data android:name="com.samsung.android.multidisplay.keep_process_alive" android:value="true" />
          </activity>
  
@@ -87,10 +95,10 @@ index a90712f..21d92e7 100644
      </application>
  </manifest>
 diff --git a/android/app/src/main/java/com/mkxpz/MainActivity.java b/android/app/src/main/java/com/mkxpz/MainActivity.java
-index be544a2..e824bf3 100644
+index be544a2..0e9e5a7 100644
 --- a/android/app/src/main/java/com/mkxpz/MainActivity.java
 +++ b/android/app/src/main/java/com/mkxpz/MainActivity.java
-@@ -3,6 +3,7 @@ package com.mkxpz;
+@@ -3,21 +3,31 @@ package com.mkxpz;
  import android.annotation.SuppressLint;
  import android.app.Activity;
  import android.app.AlarmManager;
@@ -98,44 +106,60 @@ index be544a2..e824bf3 100644
  import android.app.PendingIntent;
  import android.app.ProgressDialog;
  import android.content.Context;
-@@ -10,14 +11,18 @@ import android.content.Intent;
+ import android.content.Intent;
  import android.content.SharedPreferences;
- import android.content.pm.ActivityInfo;
+-import android.content.pm.ActivityInfo;
  import android.content.pm.PackageManager;
 +import android.graphics.Canvas;
++import android.graphics.Bitmap;
++import android.view.PixelCopy;
  import android.view.View;
 +import android.view.Gravity;
  import android.view.KeyEvent;
  import android.view.MotionEvent;
++import android.view.InputDevice;
++import android.view.SurfaceView;
  import android.view.ViewGroup.LayoutParams;
  import android.widget.TextView;
 -import android.widget.LinearLayout;
 +import android.widget.FrameLayout;
 +import android.widget.RelativeLayout;
  import android.widget.Toast;
++import android.widget.LinearLayout;
++import android.widget.ScrollView;
  import android.graphics.Color;
 +import android.graphics.Paint;
  import android.graphics.Typeface;
  import android.graphics.drawable.GradientDrawable;
  import android.os.Build;
-@@ -27,6 +32,8 @@ import android.os.Vibrator;
+@@ -27,7 +37,13 @@ import android.os.Vibrator;
  import android.os.VibrationEffect;
  import android.os.storage.StorageManager;
  import android.os.storage.OnObbStateChangeListener;
 +import android.hardware.input.InputManager;
 +import android.media.AudioManager;
  import android.net.Uri;
++import android.provider.MediaStore;
++import android.content.ContentValues;
++import android.content.pm.ActivityInfo;
++import android.Manifest;
  import android.util.Log;
  import android.util.TypedValue;
-@@ -35,6 +42,7 @@ import java.util.ArrayList;
+ import java.util.Locale;
+@@ -35,18 +51,27 @@ import java.util.ArrayList;
  import java.util.List;
  import java.io.File;
  import java.io.FileInputStream;
 +import java.io.FileOutputStream;
  import java.io.IOException;
++import java.io.OutputStream;
++import java.text.SimpleDateFormat;
++import java.util.Date;
++import java.util.LinkedHashSet;
++import java.util.Set;
  import java.io.InputStream;
  import java.nio.charset.StandardCharsets;
-@@ -42,11 +50,14 @@ import java.util.regex.Matcher;
+ import java.util.regex.Matcher;
  import java.util.regex.Pattern;
  
  import org.libsdl.app.SDLActivity;
@@ -150,7 +174,7 @@ index be544a2..e824bf3 100644
  
  public class MainActivity extends SDLActivity
  {
-@@ -65,10 +76,21 @@ public class MainActivity extends SDLActivity
+@@ -65,10 +90,23 @@ public class MainActivity extends SDLActivity
  
      private static final String PREFS_NAME = "mkxpz_prefs";
      private static final String PREFS_GAME_PATH = "game_path";
@@ -161,6 +185,7 @@ index be544a2..e824bf3 100644
 +    private static final String PREFS_AUDIO_MUTED = "audio_muted";
 +    private static final String PREFS_MIX_EXTERNAL_AUDIO = "mix_external_audio";
 +    private static final String PREFS_TOUCH_CONTROLS = "touch_controls_enabled";
++    private static final String PREFS_AUTO_HIDE_TOUCH_CONTROLS = "auto_hide_touch_controls";
 +    private static final String PREFS_CONTROL_HAPTICS = "control_haptics_enabled";
 +    private static final String PREFS_GAME_AREA_SCALE = "game_area_scale";
 +    private static final String PREFS_GRAPHICS_FILTER = "graphics_filter";
@@ -169,14 +194,20 @@ index be544a2..e824bf3 100644
      private static final int REQUEST_IMPORT_SAVES = 201;
      private static final int REQUEST_EXPORT_SAVES = 202;
 +    private static final int REQUEST_EXPORT_ERROR_REPORT = 203;
++    private static final int REQUEST_SCREENSHOT_PERMISSION = 204;
  
      protected boolean mStarted = false;
  
-@@ -87,19 +109,63 @@ public class MainActivity extends SDLActivity
+@@ -87,19 +125,68 @@ public class MainActivity extends SDLActivity
      // In-screen gamepad
      private final Gamepad mGamepad = new Gamepad();
      private boolean mGamepadInvisible = false;
 +    private boolean mTouchControlsEnabled = true;
++    private boolean mAutoHideTouchControls = true;
++    private boolean mPhysicalControllerConnected = false;
++    private AlertDialog mControllerTestDialog;
++    private TextView mControllerStatusView, mControllerButtonsView, mControllerAxesView;
++    private final Set<Integer> mPressedControllerKeys = new LinkedHashSet<>();
 +    private boolean mMixExternalAudio = true;
 +    private boolean mBundledInstallInProgress = false;
 +    private FrameLayout mGameSurfaceContainer;
@@ -238,7 +269,7 @@ index be544a2..e824bf3 100644
  
          // Run (resume) native SDL thread
          if (mHasMultiWindow) {
-@@ -153,6 +219,9 @@ public class MainActivity extends SDLActivity
+@@ -153,6 +240,9 @@ public class MainActivity extends SDLActivity
              if (resultCode == RESULT_OK && data != null && data.getData() != null) {
                  exportSaves(data.getData());
              }
@@ -248,12 +279,13 @@ index be544a2..e824bf3 100644
          }
      }
  
-@@ -176,8 +245,27 @@ public class MainActivity extends SDLActivity
+@@ -176,8 +266,28 @@ public class MainActivity extends SDLActivity
          GAME_PATH_DEFAULT = new File(gameRootBase, "mkxp-z").getAbsolutePath();
          GAME_PATH = GAME_PATH_DEFAULT;
  
 +        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 +        mTouchControlsEnabled = prefs.getBoolean(PREFS_TOUCH_CONTROLS, true);
++        mAutoHideTouchControls = prefs.getBoolean(PREFS_AUTO_HIDE_TOUCH_CONTROLS, true);
 +        boolean audioMuted = prefs.getBoolean(PREFS_AUDIO_MUTED, false);
 +        mMixExternalAudio = prefs.getBoolean(PREFS_MIX_EXTERNAL_AUDIO, true);
 +        boolean controlHaptics = prefs.getBoolean(PREFS_CONTROL_HAPTICS, true);
@@ -276,19 +308,21 @@ index be544a2..e824bf3 100644
          mStorageManager = (StorageManager) getSystemService(STORAGE_SERVICE);
          mVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
  
-@@ -196,9 +284,10 @@ public class MainActivity extends SDLActivity
+@@ -196,9 +306,12 @@ public class MainActivity extends SDLActivity
          }
  
          // Setup in-screen gamepad
 -        mGamepadInvisible = (isAndroidTV() || isChromebook());
-+        mGamepadInvisible = !mTouchControlsEnabled || isAndroidTV() || isChromebook();
++        mPhysicalControllerConnected = hasPhysicalController();
++        mGamepadInvisible = !mTouchControlsEnabled || isAndroidTV() || isChromebook() ||
++            (mAutoHideTouchControls && mPhysicalControllerConnected);
          GamepadConfig gpadConfig = new GamepadConfig();
          mGamepad.init(gpadConfig, mGamepadInvisible);
 +        mGamepad.setHapticsEnabled(controlHaptics);
          mGamepad.setOnKeyDownListener(SDLActivity::onNativeKeyDown);
          mGamepad.setOnKeyUpListener(SDLActivity::onNativeKeyUp);
  
-@@ -206,7 +295,7 @@ public class MainActivity extends SDLActivity
+@@ -206,7 +319,7 @@ public class MainActivity extends SDLActivity
              mGamepad.attachTo(this, mLayout);
          }
  
@@ -297,7 +331,7 @@ index be544a2..e824bf3 100644
          tvFps = new TextView(this);
          tvFps.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
          tvFps.setTextColor(Color.WHITE);
-@@ -220,14 +309,16 @@ public class MainActivity extends SDLActivity
+@@ -220,14 +333,16 @@ public class MainActivity extends SDLActivity
          tvFps.setPadding(dpPx(10), dpPx(4), dpPx(10), dpPx(4));
          tvFps.setVisibility(View.GONE);
  
@@ -317,7 +351,7 @@ index be544a2..e824bf3 100644
          String savedGamePath = prefs.getString(PREFS_GAME_PATH, null);
          if (savedGamePath != null && new File(savedGamePath).isDirectory()) {
              GAME_PATH = savedGamePath;
-@@ -240,13 +331,26 @@ public class MainActivity extends SDLActivity
+@@ -240,13 +355,30 @@ public class MainActivity extends SDLActivity
          mSideMenu = new SideMenu(this, mLayout);
          mSideMenu.setGamePath(GAME_PATH);
          mSideMenu.setFpsOverlayEnabled(fpsOverlayEnabled);
@@ -327,6 +361,7 @@ index be544a2..e824bf3 100644
 +        mSideMenu.setMuted(audioMuted);
 +        mSideMenu.setExternalAudioMixEnabled(mMixExternalAudio);
 +        mSideMenu.setTouchControlsEnabled(mTouchControlsEnabled);
++        mSideMenu.setAutoHideControllerEnabled(mAutoHideTouchControls);
 +        mSideMenu.setHapticsEnabled(controlHaptics);
          mSideMenu.setOnFpsOverlayToggleListener(this::setFpsOverlayEnabled);
 +        mSideMenu.setOnDisplayModeChangeListener(this::setDisplayMode);
@@ -335,6 +370,9 @@ index be544a2..e824bf3 100644
 +        mSideMenu.setOnMuteToggleListener(this::setAudioMuted);
 +        mSideMenu.setOnExternalAudioMixToggleListener(this::setExternalAudioMixEnabled);
 +        mSideMenu.setOnTouchControlsToggleListener(this::setTouchControlsEnabled);
++        mSideMenu.setOnAutoHideControllerToggleListener(this::setAutoHideTouchControls);
++        mSideMenu.setOnTestControllerListener(this::showControllerTest);
++        mSideMenu.setOnCleanScreenshotListener(this::captureCleanScreenshot);
 +        mSideMenu.setOnEditControlsListener(mGamepad::startLayoutEditor);
 +        mSideMenu.setOnHapticsToggleListener(this::setControlHapticsEnabled);
          mSideMenu.setOnLoadArchiveListener(this::pickGameArchive);
@@ -347,7 +385,7 @@ index be544a2..e824bf3 100644
      }
  
      @Override
-@@ -261,16 +365,16 @@ public class MainActivity extends SDLActivity
+@@ -261,16 +393,16 @@ public class MainActivity extends SDLActivity
  
                  // Try to mount main OBB file
                  mStorageManager.mountObb(OBB_MAIN_FILENAME, null, obbListener);
@@ -369,7 +407,7 @@ index be544a2..e824bf3 100644
              }
          } else {
              // onStart: Resume SDL thread
-@@ -278,9 +382,33 @@ public class MainActivity extends SDLActivity
+@@ -278,9 +410,33 @@ public class MainActivity extends SDLActivity
          }
      }
  
@@ -403,7 +441,7 @@ index be544a2..e824bf3 100644
          super.onDestroy();
  
          // HACK: Exiting the JVM (process) since Ruby does not like when we
-@@ -289,6 +417,86 @@ public class MainActivity extends SDLActivity
+@@ -289,9 +445,101 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
@@ -456,6 +494,16 @@ index be544a2..e824bf3 100644
 +        try {
 +            SDLControllerManager.pollInputDevices();
 +            SDLControllerManager.pollHapticDevices();
++            boolean connected = hasPhysicalController();
++            if (connected != mPhysicalControllerConnected) {
++                mPhysicalControllerConnected = connected;
++                refreshTouchControlsVisibility();
++                mPressedControllerKeys.clear();
++                updateControllerButtons();
++                if (mControllerAxesView != null)
++                    mControllerAxesView.setText(R.string.controller_buttons_idle);
++            }
++            updateControllerStatus();
 +            Log.i(TAG, "Bluetooth/USB controller list refreshed");
 +        } catch (Exception e) {
 +            Log.w(TAG, "Controller rescan failed", e);
@@ -490,7 +538,21 @@ index be544a2..e824bf3 100644
      @Override
      public boolean dispatchKeyEvent(KeyEvent evt)
      {
-@@ -315,11 +523,9 @@ public class MainActivity extends SDLActivity
++        observeControllerKey(evt);
++        boolean controllerInput = isControllerEvent(evt);
+         if (
+             evt.getKeyCode() != KeyEvent.KEYCODE_BACK &&
+             evt.getKeyCode() != KeyEvent.KEYCODE_VOLUME_UP &&
+@@ -300,7 +548,7 @@ public class MainActivity extends SDLActivity
+             evt.getKeyCode() != KeyEvent.KEYCODE_HEADSETHOOK
+         ) {
+             // Hide gamepad view on key events when visible
+-            if (!mGamepadInvisible) {
++            if (!mGamepadInvisible && (!controllerInput || mAutoHideTouchControls)) {
+                 mGamepad.hideView();
+                 mGamepadInvisible = true;
+             }
+@@ -315,11 +563,9 @@ public class MainActivity extends SDLActivity
      @Override
      public boolean dispatchTouchEvent(MotionEvent evt)
      {
@@ -499,12 +561,33 @@ index be544a2..e824bf3 100644
 -
          // Show gamepad view on touch when hidden (but not while the menu is open).
 -        if ((mSideMenu == null || !mSideMenu.isOpen()) && mGamepadInvisible) {
-+        if (mTouchControlsEnabled &&
++        if (mTouchControlsEnabled && !(mAutoHideTouchControls && mPhysicalControllerConnected) &&
 +                (mSideMenu == null || !mSideMenu.isOpen()) && mGamepadInvisible) {
              mGamepad.showView();
              mGamepadInvisible = false;
          }
-@@ -392,6 +598,381 @@ public class MainActivity extends SDLActivity
+@@ -330,12 +576,20 @@ public class MainActivity extends SDLActivity
+     @Override
+     public boolean onGenericMotionEvent(MotionEvent evt)
+     {
++        observeControllerMotion(evt);
+         if (mGamepad.processDPadEvent(evt))
+             return true;
+ 
+         return super.onGenericMotionEvent(evt);
+     }
+ 
++    @Override
++    public boolean dispatchGenericMotionEvent(MotionEvent evt)
++    {
++        observeControllerMotion(evt);
++        return super.dispatchGenericMotionEvent(evt);
++    }
++
+     /**
+      * This method is for arguments for launching native mkxp-z.
+      *
+@@ -392,6 +646,571 @@ public class MainActivity extends SDLActivity
              tvFps.setVisibility(View.GONE);
      }
  
@@ -539,13 +622,203 @@ index be544a2..e824bf3 100644
 +            .putBoolean(PREFS_TOUCH_CONTROLS, enabled)
 +            .apply();
 +
-+        if (enabled) {
-+            mGamepad.showView();
-+            mGamepadInvisible = false;
-+        } else {
-+            mGamepad.hideView();
-+            mGamepadInvisible = true;
++        refreshTouchControlsVisibility();
++    }
++
++    private void setAutoHideTouchControls(boolean enabled)
++    {
++        mAutoHideTouchControls = enabled;
++        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
++            .putBoolean(PREFS_AUTO_HIDE_TOUCH_CONTROLS, enabled).apply();
++        refreshTouchControlsVisibility();
++    }
++
++    private void refreshTouchControlsVisibility()
++    {
++        boolean hide = !mTouchControlsEnabled || isAndroidTV() || isChromebook() ||
++            (mAutoHideTouchControls && mPhysicalControllerConnected);
++        if (mGamepad == null) return;
++        if (hide) mGamepad.hideView(); else mGamepad.showView();
++        mGamepadInvisible = hide;
++    }
++
++    private boolean hasPhysicalController()
++    {
++        for (int id : InputDevice.getDeviceIds()) {
++            if (isPhysicalController(InputDevice.getDevice(id))) return true;
 +        }
++        return false;
++    }
++
++    private boolean isControllerEvent(KeyEvent event)
++    {
++        return isPhysicalController(event.getDevice());
++    }
++
++    private boolean isPhysicalController(InputDevice device)
++    {
++        // Source constants share class bits with keyboards/touchscreens; a
++        // nonzero intersection alone would hide touch controls on phones.
++        return device != null && !device.isVirtual() &&
++            (device.supportsSource(InputDevice.SOURCE_GAMEPAD) ||
++             device.supportsSource(InputDevice.SOURCE_JOYSTICK));
++    }
++
++    private void observeControllerKey(KeyEvent event)
++    {
++        if (!isControllerEvent(event)) return;
++        int key = event.getKeyCode();
++        if (event.getAction() == KeyEvent.ACTION_DOWN) mPressedControllerKeys.add(key);
++        else if (event.getAction() == KeyEvent.ACTION_UP) mPressedControllerKeys.remove(key);
++        updateControllerButtons();
++    }
++
++    private void observeControllerMotion(MotionEvent event)
++    {
++        InputDevice device = event.getDevice();
++        if (!isPhysicalController(device) || mControllerAxesView == null ||
++                !event.isFromSource(InputDevice.SOURCE_JOYSTICK)) return;
++        StringBuilder axes = new StringBuilder(device.getName()).append("\n");
++        appendAxis(axes, event, MotionEvent.AXIS_X, "X");
++        appendAxis(axes, event, MotionEvent.AXIS_Y, "Y");
++        appendAxis(axes, event, MotionEvent.AXIS_Z, "Z");
++        appendAxis(axes, event, MotionEvent.AXIS_RZ, "RZ");
++        appendAxis(axes, event, MotionEvent.AXIS_HAT_X, "HAT X");
++        appendAxis(axes, event, MotionEvent.AXIS_HAT_Y, "HAT Y");
++        appendAxis(axes, event, MotionEvent.AXIS_LTRIGGER, "L2");
++        appendAxis(axes, event, MotionEvent.AXIS_RTRIGGER, "R2");
++        if (mControllerAxesView != null) mControllerAxesView.setText(axes.toString());
++    }
++
++    private void appendAxis(StringBuilder out, MotionEvent event, int axis, String label)
++    {
++        float value = event.getAxisValue(axis);
++        out.append(label).append(": ")
++            .append(String.format(Locale.US, "%.2f", value)).append("   ");
++    }
++
++    private void showControllerTest()
++    {
++        if (mControllerTestDialog != null && mControllerTestDialog.isShowing()) return;
++        mPressedControllerKeys.clear();
++        mPhysicalControllerConnected = hasPhysicalController();
++        LinearLayout panel = new LinearLayout(this);
++        panel.setOrientation(LinearLayout.VERTICAL);
++        panel.setBackgroundColor(0xFF132139);
++        int pad = dpPx(18); panel.setPadding(pad, pad, pad, pad);
++        mControllerStatusView = new TextView(this);
++        mControllerButtonsView = new TextView(this);
++        mControllerAxesView = new TextView(this);
++        for (TextView text : new TextView[]{mControllerStatusView, mControllerButtonsView, mControllerAxesView}) {
++            text.setTextColor(Color.WHITE); text.setTextSize(16); text.setPadding(0, 0, 0, dpPx(12)); panel.addView(text);
++        }
++        ScrollView scroll = new ScrollView(this);
++        scroll.addView(panel);
++        // A dialog owns its own input window; Activity dispatch overrides do
++        // not receive controller events while the dialog has focus.
++        mControllerTestDialog = new AlertDialog(this) {
++            @Override public boolean dispatchKeyEvent(KeyEvent event) {
++                if (isControllerEvent(event) && event.getKeyCode() != KeyEvent.KEYCODE_BACK) {
++                    observeControllerKey(event);
++                    return true;
++                }
++                return super.dispatchKeyEvent(event);
++            }
++            @Override public boolean dispatchGenericMotionEvent(MotionEvent event) {
++                if (isPhysicalController(event.getDevice()) &&
++                        event.isFromSource(InputDevice.SOURCE_JOYSTICK)) {
++                    observeControllerMotion(event);
++                    return true;
++                }
++                return super.dispatchGenericMotionEvent(event);
++            }
++        };
++        mControllerTestDialog.setTitle(R.string.controller_test_title);
++        mControllerTestDialog.setView(scroll);
++        mControllerTestDialog.setButton(AlertDialog.BUTTON_POSITIVE,
++            getString(android.R.string.ok), (dialog, which) -> dialog.dismiss());
++        mControllerTestDialog.setOnDismissListener(d -> {
++            mControllerStatusView = null; mControllerButtonsView = null;
++            mControllerAxesView = null; mControllerTestDialog = null;
++            mPressedControllerKeys.clear(); refreshTouchControlsVisibility();
++        });
++        mControllerAxesView.setText(R.string.controller_buttons_idle);
++        mControllerTestDialog.show();
++        updateControllerStatus(); updateControllerButtons();
++    }
++
++    private void updateControllerStatus()
++    {
++        if (mControllerStatusView == null) return;
++        String name = "";
++        for (int id : InputDevice.getDeviceIds()) {
++            InputDevice device = InputDevice.getDevice(id);
++            if (isPhysicalController(device)) { name = " — " + device.getName(); break; }
++        }
++        mControllerStatusView.setText(getString(mPhysicalControllerConnected ? R.string.controller_connected : R.string.controller_disconnected) + name);
++    }
++
++    private void updateControllerButtons()
++    {
++        if (mControllerButtonsView == null) return;
++        if (mPressedControllerKeys.isEmpty()) { mControllerButtonsView.setText(getString(R.string.controller_buttons_idle)); return; }
++        StringBuilder text = new StringBuilder(getString(R.string.controller_buttons_label)).append("\n");
++        for (int key : mPressedControllerKeys) text.append(KeyEvent.keyCodeToString(key).replace("KEYCODE_", "")).append("  ");
++        mControllerButtonsView.setText(text.toString());
++    }
++
++    private void captureCleanScreenshot()
++    {
++        if (Build.VERSION.SDK_INT < 24) { Toast.makeText(this, R.string.screenshot_android_version, Toast.LENGTH_LONG).show(); return; }
++        if (Build.VERSION.SDK_INT < 29 && Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
++            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQUEST_SCREENSHOT_PERMISSION); return;
++        }
++        View surface = mSurface;
++        if (!(surface instanceof SurfaceView) || surface.getWidth() <= 0 || surface.getHeight() <= 0) { Toast.makeText(this, R.string.screenshot_failed, Toast.LENGTH_LONG).show(); return; }
++        Bitmap bitmap = Bitmap.createBitmap(surface.getWidth(), surface.getHeight(), Bitmap.Config.ARGB_8888);
++        try {
++            PixelCopy.request((SurfaceView) surface, bitmap, result -> {
++                if (result == PixelCopy.SUCCESS) saveAndShareScreenshot(bitmap);
++                else { bitmap.recycle(); Toast.makeText(this, R.string.screenshot_failed, Toast.LENGTH_LONG).show(); }
++            }, mMainHandler);
++        } catch (IllegalArgumentException e) {
++            bitmap.recycle();
++            Log.w(TAG, "Game surface unavailable for screenshot", e);
++            Toast.makeText(this, R.string.screenshot_failed, Toast.LENGTH_LONG).show();
++        }
++    }
++
++    private void saveAndShareScreenshot(Bitmap bitmap)
++    {
++        Uri uri = null;
++        String filename = "Nordeluna-" + new SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(new Date()) +
++            (Build.VERSION.SDK_INT >= 29 ? ".png" : ".jpg");
++        try {
++            if (Build.VERSION.SDK_INT >= 29) {
++                ContentValues values = new ContentValues(); values.put(MediaStore.Images.Media.DISPLAY_NAME, filename);
++                values.put(MediaStore.Images.Media.MIME_TYPE, "image/png"); values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Nordeluna"); values.put(MediaStore.Images.Media.IS_PENDING, 1);
++                uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
++                if (uri == null) throw new IOException("MediaStore insert failed");
++                try (OutputStream out = getContentResolver().openOutputStream(uri)) { if (out == null || !bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) throw new IOException("PNG write failed"); }
++                values.clear(); values.put(MediaStore.Images.Media.IS_PENDING, 0); getContentResolver().update(uri, values, null, null);
++            } else {
++                String path = MediaStore.Images.Media.insertImage(getContentResolver(), bitmap, filename, "Nordeluna screenshot");
++                if (path == null) throw new IOException("MediaStore insert failed"); uri = Uri.parse(path);
++            }
++            Intent share = new Intent(Intent.ACTION_SEND); share.setType(Build.VERSION.SDK_INT >= 29 ? "image/png" : "image/jpeg"); share.putExtra(Intent.EXTRA_STREAM, uri); share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
++            startActivity(Intent.createChooser(share, getString(R.string.screenshot_share_title)));
++        } catch (Exception e) {
++            if (uri != null) getContentResolver().delete(uri, null, null);
++            Log.e(TAG, "Screenshot export failed", e); Toast.makeText(this, R.string.screenshot_failed, Toast.LENGTH_LONG).show();
++        } finally { bitmap.recycle(); }
++    }
++
++    @Override
++    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults)
++    {
++        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
++        if (requestCode == REQUEST_SCREENSHOT_PERMISSION && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) captureCleanScreenshot();
++        else if (requestCode == REQUEST_SCREENSHOT_PERMISSION) Toast.makeText(this, R.string.screenshot_permission_denied, Toast.LENGTH_LONG).show();
 +    }
 +
 +    private void setControlHapticsEnabled(boolean enabled)
@@ -886,7 +1159,7 @@ index be544a2..e824bf3 100644
      /**
       * This static method is used in native mkxp-z. (see systemImpl.cpp)
       * This method returns a string of current device locale tag. (e.g. "en_US")
-@@ -488,6 +1069,7 @@ public class MainActivity extends SDLActivity
+@@ -488,6 +1307,7 @@ public class MainActivity extends SDLActivity
          intent.setType("*/*");
          // .rxdata/.rvdata files have no standard MIME type.
          intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
@@ -894,7 +1167,7 @@ index be544a2..e824bf3 100644
              "application/octet-stream",
              "application/x-rpgmaker"
          });
-@@ -496,15 +1078,26 @@ public class MainActivity extends SDLActivity
+@@ -496,15 +1316,26 @@ public class MainActivity extends SDLActivity
      }
  
      /**
@@ -924,7 +1197,7 @@ index be544a2..e824bf3 100644
      /**
       * The directories where the game may keep its save files. RPG Maker's
       * {@code save_data} writes into the game folder, but games that use
-@@ -549,64 +1142,104 @@ public class MainActivity extends SDLActivity
+@@ -549,64 +1380,104 @@ public class MainActivity extends SDLActivity
          final File[] roots = saveRoots();
  
          new Thread(() -> {
@@ -1055,7 +1328,7 @@ index be544a2..e824bf3 100644
      }
  
      /**
-@@ -681,6 +1314,116 @@ public class MainActivity extends SDLActivity
+@@ -681,6 +1552,116 @@ public class MainActivity extends SDLActivity
          }).start();
      }
  
@@ -1172,7 +1445,7 @@ index be544a2..e824bf3 100644
      /**
       * Searches for the directory that actually contains a game, starting from
       * {@code root} and descending into its subdirectories.
-@@ -810,33 +1553,4 @@ public class MainActivity extends SDLActivity
+@@ -810,33 +1791,4 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
@@ -1207,7 +1480,7 @@ index be544a2..e824bf3 100644
 -    }
  }
 diff --git a/android/app/src/main/java/com/mkxpz/gamepad/Gamepad.java b/android/app/src/main/java/com/mkxpz/gamepad/Gamepad.java
-index 0e8b645..abb2adf 100644
+index 0e8b645..aaae27d 100644
 --- a/android/app/src/main/java/com/mkxpz/gamepad/Gamepad.java
 +++ b/android/app/src/main/java/com/mkxpz/gamepad/Gamepad.java
 @@ -2,6 +2,14 @@ package com.mkxpz.gamepad;
@@ -1259,7 +1532,7 @@ index 0e8b645..abb2adf 100644
  
      private OnKeyDownListener mOnKeyDownListener = key -> {};
      private OnKeyUpListener mOnKeyUpListener = key -> {};
-@@ -65,6 +93,10 @@ public class Gamepad
+@@ -65,13 +93,17 @@ public class Gamepad
      @SuppressLint("ClickableViewAccessibility")
      public void attachTo(Context context, ViewGroup viewGroup)
      {
@@ -1270,6 +1543,14 @@ index 0e8b645..abb2adf 100644
          // Setup layout of in-screen gamepad
          LayoutInflater inflater = (LayoutInflater) context.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
          ViewGroup layout = (ViewGroup) inflater.inflate(R.layout.gamepad_layout, viewGroup);
+         mGamepadLayout = layout.findViewById(R.id.gamepad_layout);
+ 
+         if (mInvisible) {
+-            mGamepadLayout.setAlpha(0);
++            mGamepadLayout.setVisibility(View.GONE);
+         }
+ 
+         // Setup D-Pad and buttons
 @@ -90,7 +122,10 @@ public class Gamepad
  
          // Setup in-screen gamepad listeners
@@ -1303,7 +1584,7 @@ index 0e8b645..abb2adf 100644
          // Apply scale and opacity from gamepad config
          ViewUtils.resize(mGamepadLayout, mGamepadConfig.scale);
          ViewUtils.changeOpacity(mGamepadLayout, mGamepadConfig.opacity);
-@@ -115,10 +164,207 @@ public class Gamepad
+@@ -115,15 +164,213 @@ public class Gamepad
          // Set gamepad button
          gpadBtn.setForegroundText(btnLabel);
          gpadBtn.setKey(keycode);
@@ -1512,7 +1793,34 @@ index 0e8b645..abb2adf 100644
      public void showView()
      {
          if (mGamepadLayout != null) {
-@@ -250,4 +496,4 @@ public class Gamepad
+-            if (mGamepadLayout.getAlpha() == 0)
+-                mGamepadLayout.setAlpha(1);
++            mGamepadLayout.clearAnimation();
++            mGamepadLayout.setVisibility(View.VISIBLE);
++            mGamepadLayout.setAlpha(1);
+ 
+             AlphaAnimation anim = new AlphaAnimation(0.0f, 1.0f);
+             anim.setDuration(250);
+@@ -135,9 +382,17 @@ public class Gamepad
+     public void hideView()
+     {
+         if (mGamepadLayout != null) {
++            mGamepadLayout.clearAnimation();
+             AlphaAnimation anim = new AlphaAnimation(1.0f, 0.0f);
+             anim.setDuration(500);
+-            anim.setFillAfter(true);
++            anim.setAnimationListener(new android.view.animation.Animation.AnimationListener() {
++                @Override public void onAnimationStart(android.view.animation.Animation animation) {}
++                @Override public void onAnimationRepeat(android.view.animation.Animation animation) {}
++                @Override public void onAnimationEnd(android.view.animation.Animation animation) {
++                    mGamepadLayout.setVisibility(View.GONE);
++                    mGamepadLayout.setAlpha(1f);
++                }
++            });
+             mGamepadLayout.startAnimation(anim);
+         }
+     }
+@@ -250,4 +505,4 @@ public class Gamepad
  
          return true;
      }
@@ -1771,7 +2079,7 @@ index fa96fbb..7ddd625 100644
          throws IOException
      {
 diff --git a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
-index 155e305..3268289 100644
+index 155e305..3d24495 100644
 --- a/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
 +++ b/android/app/src/main/java/com/mkxpz/launcher/SideMenu.java
 @@ -4,14 +4,17 @@ import android.content.Context;
@@ -1824,7 +2132,7 @@ index 155e305..3268289 100644
      public interface OnLoadArchiveListener
      {
          void onLoadArchive();
-@@ -43,48 +60,110 @@ public class SideMenu
+@@ -43,48 +60,129 @@ public class SideMenu
          void onExportSaves();
      }
  
@@ -1868,6 +2176,21 @@ index 155e305..3268289 100644
 +        void onHapticsToggle(boolean enabled);
 +    }
 +
++    public interface OnAutoHideControllerToggleListener
++    {
++        void onAutoHideControllerToggle(boolean enabled);
++    }
++
++    public interface OnTestControllerListener
++    {
++        void onTestController();
++    }
++
++    public interface OnCleanScreenshotListener
++    {
++        void onCleanScreenshot();
++    }
++
 +    public interface OnGameAreaScaleChangeListener
 +    {
 +        void onGameAreaScaleChange(int percent);
@@ -1891,6 +2214,7 @@ index 155e305..3268289 100644
 +    private Switch mExternalAudioMixToggle;
 +    private Switch mTouchControlsToggle;
 +    private Switch mHapticsToggle;
++    private Switch mAutoHideControllerToggle;
 +    private RadioGroup mDisplayModeGroup;
 +    private RadioButton mKeepAspectOption;
 +    private RadioButton mFillScreenOption;
@@ -1921,6 +2245,9 @@ index 155e305..3268289 100644
 +    private OnTouchControlsToggleListener mOnTouchControlsToggleListener = enabled -> {};
 +    private OnEditControlsListener mOnEditControlsListener = () -> {};
 +    private OnHapticsToggleListener mOnHapticsToggleListener = enabled -> {};
++    private OnAutoHideControllerToggleListener mOnAutoHideControllerToggleListener = enabled -> {};
++    private OnTestControllerListener mOnTestControllerListener = () -> {};
++    private OnCleanScreenshotListener mOnCleanScreenshotListener = () -> {};
 +    private OnGameAreaScaleChangeListener mOnGameAreaScaleChangeListener = percent -> {};
 +    private OnGraphicsFilterChangeListener mOnGraphicsFilterChangeListener = filter -> {};
  
@@ -1947,7 +2274,7 @@ index 155e305..3268289 100644
  
          build();
          setOffset(-mPanelWidth);
-@@ -105,17 +184,128 @@ public class SideMenu
+@@ -105,17 +203,149 @@ public class SideMenu
          mOnExportSavesListener = listener;
      }
  
@@ -1991,6 +2318,21 @@ index 155e305..3268289 100644
 +        mOnHapticsToggleListener = listener;
 +    }
 +
++    public void setOnAutoHideControllerToggleListener(OnAutoHideControllerToggleListener listener)
++    {
++        mOnAutoHideControllerToggleListener = listener;
++    }
++
++    public void setOnTestControllerListener(OnTestControllerListener listener)
++    {
++        mOnTestControllerListener = listener;
++    }
++
++    public void setOnCleanScreenshotListener(OnCleanScreenshotListener listener)
++    {
++        mOnCleanScreenshotListener = listener;
++    }
++
 +    public void setOnGameAreaScaleChangeListener(OnGameAreaScaleChangeListener listener)
 +    {
 +        mOnGameAreaScaleChangeListener = listener;
@@ -2029,6 +2371,12 @@ index 155e305..3268289 100644
 +    {
 +        if (mHapticsToggle != null)
 +            mHapticsToggle.setChecked(enabled);
++    }
++
++    public void setAutoHideControllerEnabled(boolean enabled)
++    {
++        if (mAutoHideControllerToggle != null)
++            mAutoHideControllerToggle.setChecked(enabled);
 +    }
 +
 +    public void setDisplayMode(int mode)
@@ -2076,7 +2424,7 @@ index 155e305..3268289 100644
      public void setGamePath(String path)
      {
          if (mGamePathView != null)
-@@ -141,30 +331,56 @@ public class SideMenu
+@@ -141,30 +371,56 @@ public class SideMenu
          // The panel itself.
          mPanel = new LinearLayout(mContext);
          mPanel.setOrientation(LinearLayout.VERTICAL);
@@ -2140,7 +2488,7 @@ index 155e305..3268289 100644
          LinearLayout.LayoutParams loadLp = new LinearLayout.LayoutParams(
              ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
          loadLp.setMargins(0, dp(24), 0, 0);
-@@ -173,11 +389,159 @@ public class SideMenu
+@@ -173,11 +429,186 @@ public class SideMenu
              close();
              mOnLoadArchiveListener.onLoadArchive();
          });
@@ -2259,6 +2607,18 @@ index 155e305..3268289 100644
 +        TextView filterHint = makeHint(R.string.graphics_filter_restart_hint);
 +        content.addView(filterHint);
 +
++        Button cleanScreenshot = new Button(mContext);
++        cleanScreenshot.setText(R.string.clean_screenshot);
++        styleActionButton(cleanScreenshot, false);
++        cleanScreenshot.setOnClickListener(v -> {
++            close();
++            mOnCleanScreenshotListener.onCleanScreenshot();
++        });
++        LinearLayout.LayoutParams screenshotLp = new LinearLayout.LayoutParams(
++            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++        screenshotLp.setMargins(0, dp(14), 0, 0);
++        content.addView(cleanScreenshot, screenshotLp);
++
 +        addSectionHeader(content, R.string.section_controls);
 +
 +        mTouchControlsToggle = makeSwitch(R.string.show_touch_controls);
@@ -2279,6 +2639,21 @@ index 155e305..3268289 100644
 +        mHapticsToggle.setOnCheckedChangeListener((buttonView, isChecked) ->
 +            mOnHapticsToggleListener.onHapticsToggle(isChecked));
 +        content.addView(mHapticsToggle);
++
++        Button testController = new Button(mContext);
++        testController.setText(R.string.test_bluetooth_controller);
++        styleActionButton(testController, false);
++        testController.setOnClickListener(v -> {
++            close();
++            mOnTestControllerListener.onTestController();
++        });
++        content.addView(testController);
++
++        mAutoHideControllerToggle = makeSwitch(R.string.auto_hide_touch_controls);
++        mAutoHideControllerToggle.setOnCheckedChangeListener((buttonView, isChecked) ->
++            mOnAutoHideControllerToggleListener.onAutoHideControllerToggle(isChecked));
++        content.addView(mAutoHideControllerToggle);
++        content.addView(makeHint(R.string.auto_hide_touch_controls_hint));
 +
 +        addSectionHeader(content, R.string.section_audio);
 +
@@ -2302,7 +2677,7 @@ index 155e305..3268289 100644
          LinearLayout.LayoutParams importLp = new LinearLayout.LayoutParams(
              ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
          importLp.setMargins(0, dp(12), 0, 0);
-@@ -186,11 +550,11 @@ public class SideMenu
+@@ -186,11 +617,11 @@ public class SideMenu
              close();
              mOnImportSavesListener.onImportSaves();
          });
@@ -2316,7 +2691,7 @@ index 155e305..3268289 100644
          LinearLayout.LayoutParams exportLp = new LinearLayout.LayoutParams(
              ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
          exportLp.setMargins(0, dp(12), 0, 0);
-@@ -199,112 +563,182 @@ public class SideMenu
+@@ -199,112 +630,182 @@ public class SideMenu
              close();
              mOnExportSavesListener.onExportSaves();
          });
@@ -2581,7 +2956,7 @@ index 155e305..3268289 100644
      }
  
      private void setOffset(float offset)
-@@ -323,7 +757,7 @@ public class SideMenu
+@@ -323,7 +824,7 @@ public class SideMenu
      public void open()
      {
          mOpen = true;
@@ -2590,7 +2965,7 @@ index 155e305..3268289 100644
          mPanel.setVisibility(View.VISIBLE);
          mScrim.setVisibility(View.VISIBLE);
          animateTo(0f);
-@@ -333,8 +767,7 @@ public class SideMenu
+@@ -333,8 +834,7 @@ public class SideMenu
      {
          mOpen = false;
          animateTo(-mPanelWidth);
@@ -2698,10 +3073,10 @@ index 7c821a4..c5f9920 100644
      public static void captureClose() {
          if (mAudioRecord != null) {
 diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
-index 9e37fed..a68f3fd 100644
+index 9e37fed..e9424b5 100644
 --- a/android/app/src/main/res/values/strings.xml
 +++ b/android/app/src/main/res/values/strings.xml
-@@ -1,11 +1,52 @@
+@@ -1,11 +1,65 @@
  <?xml version="1.0" encoding="utf-8"?>
  <resources>
      <!-- Main application name -->
@@ -2752,10 +3127,23 @@ index 9e37fed..a68f3fd 100644
 +    <string name="show_touch_controls">Mostrar controles na tela</string>
 +    <string name="edit_touch_controls">Editar layout dos controles</string>
 +    <string name="control_vibration">Vibração dos controles</string>
++    <string name="test_bluetooth_controller">Testar controle Bluetooth</string>
++    <string name="auto_hide_touch_controls">Ocultar controles ao conectar</string>
++    <string name="auto_hide_touch_controls_hint">Esconde os botões de toque quando um controle físico está conectado.</string>
++    <string name="clean_screenshot">Capturar tela sem controles</string>
++    <string name="controller_test_title">Teste de controle</string>
++    <string name="controller_connected">Controle conectado</string>
++    <string name="controller_disconnected">Nenhum controle detectado</string>
++    <string name="controller_buttons_idle">Pressione botões ou mova os analógicos.</string>
++    <string name="controller_buttons_label">Botões pressionados:</string>
++    <string name="screenshot_share_title">Compartilhar captura</string>
++    <string name="screenshot_failed">Não foi possível capturar a tela do jogo.</string>
++    <string name="screenshot_android_version">Captura sem controles requer Android 7.0 ou superior.</string>
++    <string name="screenshot_permission_denied">Permita acesso ao armazenamento para salvar a captura.</string>
 +    <string name="mute_audio">Silenciar jogo</string>
 +    <string name="mix_external_audio">Permitir música de outros aplicativos</string>
 +    <string name="mix_external_audio_hint">Ativado por padrão: Spotify, YouTube Music e outros podem tocar junto com o jogo.</string>
 +    <string name="whats_new_title">Novidades da versão %1$s</string>
-+    <string name="whats_new_message">• Filtros nativos bicúbico, Lanczos3 e xBRZ, além de Pixel e Bilinear. CRT com scanlines mais visíveis.\n\n• Painel de configurações redesenhado em azul noturno.\n\n• Opção para tocar áudio junto com Spotify, YouTube Music e outros aplicativos.\n\n• Correção do botão de silenciar: o áudio SDL é silenciado diretamente.\n\n• Editor para arrastar, redimensionar e ajustar a transparência dos controles; vibração opcional.\n\n• Exportação e importação de saves em ZIP com backup; relatório de erro exportável.\n\n• Atualização do jogo Nordeluna.</string>
++    <string name="whats_new_message">• Teste de controles Bluetooth e ocultação automática dos controles de toque.\n\n• Capturas de tela do jogo sem os controles virtuais.\n\n• Filtros nativos bicúbico, Lanczos3 e xBRZ, além de Pixel e Bilinear. CRT com scanlines mais visíveis.\n\n• Painel de configurações redesenhado em azul noturno.\n\n• Mixagem com Spotify, YouTube Music e outros aplicativos; correção do botão de silenciar.\n\n• Editor e vibração opcional dos controles.\n\n• Exportação e importação de saves em ZIP com backup; relatório de erro exportável.\n\n• Atualização do jogo Nordeluna.</string>
 +    <string name="got_it">Entendi</string>
  </resources>
