@@ -13,6 +13,7 @@ on:
       - scripts/prepare-android-game.sh
       - scripts/pack-android-directory.py
       - scripts/tests/**
+      - scripts/test-touch-controls.py
 
 permissions:
   contents: read
@@ -68,6 +69,9 @@ jobs:
           git clone --no-checkout https://codeberg.org/warmwinter/mkxp-z.git build-android/mkxp-z
           git -C build-android/mkxp-z checkout "$MKXP_Z_COMMIT"
           git -C build-android/mkxp-z apply "$GITHUB_WORKSPACE/android/nordeluna.patch"
+
+      - name: Check touch controls visibility
+        run: python3 scripts/test-touch-controls.py build-android/mkxp-z
 
       - name: Preserve sideload signing key
         uses: actions/cache@v4
