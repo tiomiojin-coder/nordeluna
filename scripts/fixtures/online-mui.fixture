@@ -1,0 +1,67 @@
+module System
+  def self.uptime; 12345.25; end
+end
+
+c = NordelunaOnline::PokemonCodec
+j = NordelunaOnline::JSON
+p = Pokemon.new(:PIKACHU, 35, nil, true, false)
+p.moves = [Pokemon::Move.new(:TACKLE)]
+p.shiny_leaf = 6
+p.last_update_time = 9876543.75
+p.legacy_data[:party_time] = 1234.125
+p.legacy_data[:trade_count] = 7
+p.legacy_data[:critical_count] = 42
+original_history = Marshal.dump(p.legacy_data)
+packet = j.parse(j.dump(c.encode(p)))
+check(!packet['fields'].key?('last_update_time'), 'remote session clock leaked into packet')
+q = c.decode(packet)
+check(q.shiny_leaf == 6 && q.shiny_crown?, 'shiny crown lost')
+check(q.legacy_data == p.legacy_data, 'MUI legacy history lost')
+check(q.last_update_time == System.uptime, 'remote clock was not reset to local uptime')
+check(c.encode(q) == c.encode(p), 'MUI roundtrip changed packet')
+check(p.last_update_time == 9876543.75 && Marshal.dump(p.legacy_data) == original_history,
+      'encoding changed campaign Pokemon')
+
+[0.0, 0.125, 1e-9, 1e12].each do |duration|
+  p.legacy_data[:party_time] = duration
+  q = c.decode(j.parse(j.dump(c.encode(p))))
+  check(q.legacy_data[:party_time] == duration, 'fractional party time changed')
+end
+p.legacy_data[:party_time] = 1234.125
+[Float::NAN, Float::INFINITY, -Float::INFINITY].each do |number|
+  rejects('non-finite float accepted') { c.tree(number) }
+end
+rejects('invalid float tag accepted') { c.untree({'f'=>'NaN'}) }
+rejects('infinite exponent accepted') { c.untree({'f'=>'1e9999'}) }
+bad = j.parse(j.dump(c.encode(p)))
+bad['fields']['shiny_leaf'] = 7
+rejects('invalid shiny leaf accepted') { c.decode(bad) }
+bad = j.parse(j.dump(c.encode(p)))
+bad['fields']['legacy_data'] = c.tree({party_time: -1.0})
+rejects('negative party time accepted') { c.decode(bad) }
+p.instance_variable_set(:@unknown_plugin_data, 1)
+rejects('unknown plugin field silently discarded') { c.encode(p) }
+p.remove_instance_variable(:@unknown_plugin_data)
+
+# Escrow rollback and completed delivery preserve MUI history, not remote clocks.
+p.legacy_data[:party_time] = 1234.125
+$PokemonGlobal = PokemonGlobalMetadata.new
+$player.party = [p, Pokemon.new(:EEVEE, 15, nil, true, false)]
+$player.party[1].moves = [Pokemon::Move.new(:TACKLE)]
+session = NordelunaOnline::Session.new('https://example.org', {'code'=>'ABCDEFGH','token'=>'test','side'=>0})
+outgoing = c.encode(p)
+incoming = c.encode($player.party[1])
+Game.save_success = true
+NordelunaOnline.reserve_trade(session, 0, outgoing, incoming, 'Sol')
+NordelunaOnline.deliver_trade(false)
+check(c.encode($player.party[0]) == outgoing, 'escrow return lost MUI history')
+check($player.party[0].last_update_time == System.uptime, 'escrow return kept remote clock')
+NordelunaOnline.reserve_trade(session, 0, outgoing, incoming, 'Sol')
+NordelunaOnline.deliver_trade(true)
+received = $player.party[0]
+expected = c.decode(incoming)
+check(received.legacy_data == expected.legacy_data && received.shiny_leaf == expected.shiny_leaf,
+      'completed trade lost MUI data')
+check(received.obtain_method == 2 && received.owner.id == expected.owner.id,
+      'normal trade metadata changed incorrectly')
+'OK: base online/battle checks plus actual MUI fields, fractional time, local clocks, shiny crown, escrow and strict validation.'
