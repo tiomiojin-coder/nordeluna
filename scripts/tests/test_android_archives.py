@@ -64,6 +64,28 @@ class AndroidArchivesTest(unittest.TestCase):
             self.assertEqual(zip.read("Graphics/Pictures/Laborato (Intro).png"), b"updated intro")
             self.assertTrue(zip.getinfo("Graphics/Tilesets/Nova regi\u00e3o.png").flag_bits & 0x800)
 
+    def test_windows_unicode_entries_get_portable_headers(self):
+        original = self.root / "windows.zip"
+        name = "Audio/BGM/CENTRO POKÉMON.ogg"
+        with zipfile.ZipFile(original, "w") as archive:
+            for path in self.game.rglob("*"):
+                if path.is_file():
+                    archive.write(path, path.relative_to(self.game).as_posix())
+            entry = zipfile.ZipInfo(name)
+            entry.create_system = 0
+            archive.writestr(entry, b"new audio")
+        output = self.root / "prepared.zip"
+        prepare.prepare_archive(original, output, self.config)
+        with zipfile.ZipFile(output) as archive:
+            entry = archive.getinfo(name)
+            self.assertEqual(entry.create_system, 3)
+            self.assertTrue(entry.flag_bits & 0x800)
+            self.assertLess(entry.extract_version, 45, "small files should not force ZIP64 local headers")
+            self.assertEqual(archive.read(name), b"new audio")
+            extracted = self.root / "extracted"
+            archive.extractall(extracted)
+        self.assertEqual((extracted / name).read_bytes(), b"new audio")
+
     def test_pack_rejects_unconverted_midi(self):
         (self.game / "Audio/BGM/New.mid").write_bytes(b"midi fixture")
         self.assertIn("unconverted MIDI", self.pack().stderr)

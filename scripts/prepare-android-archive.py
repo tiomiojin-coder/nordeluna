@@ -30,11 +30,14 @@ def copy_info(source: zipfile.ZipInfo, filename: str) -> zipfile.ZipInfo:
     target = zipfile.ZipInfo(filename=filename, date_time=source.date_time)
     target.compress_type = source.compress_type
     target.comment = source.comment
-    target.create_system = source.create_system
-    target.create_version = source.create_version
-    target.extract_version = source.extract_version
-    target.external_attr = source.external_attr
+    # Canonical Unix metadata: Info-ZIP on Linux can otherwise reinterpret
+    # UTF-8 names from a Windows-host entry when its local header uses ZIP64.
+    target.create_system = 3
+    target.external_attr = ((0o40755 if filename.endswith("/") else 0o100644) << 16)
+    if filename.endswith("/"):
+        target.external_attr |= 0x10
     target.internal_attr = source.internal_attr
+    target.file_size = source.file_size
     # Do not retain legacy Unicode/path extras. zipfile writes the normalized
     # filename itself and sets the UTF-8 flag whenever it is required.
     return target
@@ -81,7 +84,7 @@ def prepare_archive(input_path: Path, output_path: Path, config_path: Path) -> N
                     continue
 
                 with source.open(entry, "r") as source_file, target.open(
-                    out_info, "w", force_zip64=True
+                    out_info, "w"
                 ) as target_file:
                     shutil.copyfileobj(source_file, target_file, length=1024 * 1024)
 
