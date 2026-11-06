@@ -23,7 +23,7 @@ O botão publica os commits locais da `main`, além da atualização do jogo. Mu
 
 ## O que entra no APK
 
-Arquivos de execução de `Audio`, `Data`, `Fonts`, `Graphics`, `Movies` e `Plugins`, além de `Game.ini`, `mkxp.json`, `soundfont.sf2` e `achievements.dat` quando aplicável. Saves pessoais na raiz e ambientes Python `.venv` não são incluídos. A pasta original do jogo não é modificada.
+Arquivos de execução de `Audio`, `Data`, `Fonts`, `Graphics`, `Movies` e `Plugins`, além de `Game.ini`, `mkxp.json`, `soundfont.sf2` e `achievements.dat` quando aplicável. Saves pessoais na raiz, ambientes Python `.venv`, backups, cópias em `Plugins/output`, testes/referências de desenvolvimento e o servidor/banco do plugin online não são incluídos. A pasta original do jogo não é modificada.
 
 O jogo deve estar previamente compilado no editor: o atualizador empacota os dados atuais, não compila PBS. A conversão de áudio e compilação do aplicativo Android continuam sendo realizadas pelo workflow existente.
 

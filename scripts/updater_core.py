@@ -24,6 +24,7 @@ REPOSITORY = "tiomiojin-coder/nordeluna"
 WORKFLOW = "nordeluna-android.yml"
 RUNTIME_DIRS = ("Audio", "Data", "Fonts", "Graphics", "Movies", "Plugins")
 RUNTIME_FILES = ("mkxp.json", "soundfont.sf2", "achievements.dat")
+DEVELOPMENT_DIRS = {".venv", ".backups", "__pycache__", ".git", ".pytest_cache"}
 STATE = ROOT / ".cache/nordeluna-updater"
 SETTINGS = STATE / "settings.json"
 
@@ -136,7 +137,17 @@ def inventory(source):
     files = {}
     for folder in RUNTIME_DIRS:
         for base, dirs, names in os.walk(source / folder, followlinks=False):
-            dirs[:] = [d for d in dirs if d != ".venv" and not (Path(base) / d).is_symlink()]
+            parent = Path(base).relative_to(source).as_posix()
+            def include_directory(name):
+                if name in DEVELOPMENT_DIRS or (Path(base) / name).is_symlink():
+                    return False
+                if parent == "Plugins" and (name == "output" or name.startswith("_") and
+                        (name.endswith("_tests") or name.endswith("_reference"))):
+                    return False
+                if parent == "Plugins/Nordeluna Online" and name == "server":
+                    return False
+                return True
+            dirs[:] = [d for d in dirs if include_directory(d)]
             for name in names:
                 path = Path(base) / name
                 if path.is_symlink():

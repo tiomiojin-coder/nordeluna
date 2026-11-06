@@ -18,6 +18,13 @@ def fixture(folder):
     files = {"Game.ini": b"[Game]\nTitle=Old\n", "Data/Scripts.rxdata": b"scripts",
              "mkxp.json": b"{}", "soundfont.sf2": b"font", "Graphics/Laboratório.png": b"image",
              "Audio/BGM/música.ogg": b"music", "Plugins/.venv/private.txt": b"exclude",
+             "Plugins/output/old-game/Data/Scripts.rxdata": b"exclude",
+             "Plugins/.backups/old-plugin.rb": b"exclude",
+             "Plugins/_online_tests/test_private.py": b"exclude",
+             "Plugins/_online_reference/old-plugin.rb": b"exclude",
+             "Plugins/Nordeluna Online/server/relay.sqlite3": b"private database",
+             "Plugins/Nordeluna Online/server/relay.log": b"private sessions",
+             "Plugins/Nordeluna Online/001_Config.rb": b"module NordelunaOnline; end",
              "Game.rxdata": b"personal save"}
     for name, data in files.items():
         target = folder / name
@@ -45,6 +52,10 @@ class UpdaterTests(unittest.TestCase):
         with zipfile.ZipFile(output) as archive:
             self.assertNotIn("Game.rxdata", archive.namelist())
             self.assertFalse(any(".venv" in name for name in archive.namelist()))
+            self.assertFalse(any(name.startswith(("Plugins/output/", "Plugins/.backups/",
+                "Plugins/_online_tests/", "Plugins/_online_reference/", "Plugins/Nordeluna Online/server/"))
+                for name in archive.namelist()))
+            self.assertIn("Plugins/Nordeluna Online/001_Config.rb", archive.namelist())
             self.assertIn(b"Title=Pokemon Nordeluna", archive.read("Game.ini"))
             self.assertTrue(archive.getinfo("Graphics/Laboratório.png").flag_bits & 0x800)
             self.assertIsNone(archive.testzip())

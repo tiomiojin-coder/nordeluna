@@ -1,5 +1,5 @@
 diff --git a/android/app/build.gradle b/android/app/build.gradle
-index 036a159..64359ab 100644
+index 036a159..0c92d1b 100644
 --- a/android/app/build.gradle
 +++ b/android/app/build.gradle
 @@ -7,12 +7,12 @@ android {
@@ -14,7 +14,7 @@ index 036a159..64359ab 100644
 -        versionName "0.1.0"
 -        archivesBaseName = "mkxp-z-$versionName"
 +        versionCode 13
-+        versionName "1.8.0"
++        versionName "1.9.0"
 +        archivesBaseName = "Nordeluna-Android-$versionName"
          // Native ABIs are produced by build.sh (see ../build.sh) and placed
          // under src/main/jniLibs/. Everything present there is packaged.
@@ -47,7 +47,7 @@ index 036a159..64359ab 100644
 -}
 +// Native libraries are copied from the pinned upstream reference APK by CI.
 diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
-index a90712f..d88f3bf 100644
+index a90712f..c6a419f 100644
 --- a/android/app/src/main/AndroidManifest.xml
 +++ b/android/app/src/main/AndroidManifest.xml
 @@ -6,6 +6,7 @@
@@ -67,7 +67,11 @@ index a90712f..d88f3bf 100644
          android:theme="@style/AppTheme"
          android:appCategory="game"
          android:isGame="true"
-@@ -44,8 +45,8 @@
+@@ -41,11 +42,12 @@
+         android:largeHeap="true"
+         android:extractNativeLibs="true"
+         android:allowBackup="true"
++        android:usesCleartextTraffic="true"
      >
          <!-- Main activity -->
          <activity
@@ -78,7 +82,7 @@ index a90712f..d88f3bf 100644
              android:launchMode="singleTop"
              android:alwaysRetainTaskState="true"
              android:screenOrientation="sensorLandscape"
-@@ -72,15 +73,5 @@
+@@ -72,15 +74,5 @@
              <meta-data android:name="com.samsung.android.multidisplay.keep_process_alive" android:value="true" />
          </activity>
  
@@ -1906,10 +1910,10 @@ index 0e8b645..5b904e7 100644
 +}
 diff --git a/android/app/src/main/java/com/mkxpz/launcher/ErrorReport.java b/android/app/src/main/java/com/mkxpz/launcher/ErrorReport.java
 new file mode 100644
-index 0000000..3603414
+index 0000000..917acac
 --- /dev/null
 +++ b/android/app/src/main/java/com/mkxpz/launcher/ErrorReport.java
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,97 @@
 +package com.mkxpz.launcher;
 +
 +import android.content.Context;
@@ -1917,6 +1921,7 @@ index 0000000..3603414
 +import android.os.Build;
 +
 +import java.io.BufferedReader;
++import java.io.File;
 +import java.io.IOException;
 +import java.io.InputStreamReader;
 +import java.io.OutputStream;
@@ -1953,6 +1958,27 @@ index 0000000..3603414
 +                "Caminho do jogo disponível: " + (gamePath != null) + "\n";
 +            addText(zip, "informacoes.txt", info);
 +            addText(zip, "logcat.txt", readLogcat());
++            // Essentials' original event message is not always sent to logcat.
++            if (gamePath != null) {
++                addGameLog(zip, "nordeluna-event-errors.log",
++                    new File(gamePath, "nordeluna-event-errors.log"));
++                addGameLog(zip, "game-errorlog.txt", new File(gamePath, "errorlog.txt"));
++            }
++        }
++    }
++
++    private static void addGameLog(ZipOutputStream zip, String name, File file)
++        throws IOException
++    {
++        if (!file.isFile()) return;
++        // Bound report size and keep the latest diagnostics.
++        try (java.io.RandomAccessFile input = new java.io.RandomAccessFile(file, "r")) {
++            input.seek(Math.max(0, input.length() - 512 * 1024));
++            byte[] buffer = new byte[8192];
++            zip.putNextEntry(new ZipEntry(name));
++            int count;
++            while ((count = input.read(buffer)) != -1) zip.write(buffer, 0, count);
++            zip.closeEntry();
 +        }
 +    }
 +

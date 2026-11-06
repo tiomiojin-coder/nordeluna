@@ -19,3 +19,29 @@ module NordelunaAndroidDisplay
 end
 
 Object.prepend(NordelunaAndroidDisplay) unless Object.ancestors.include?(NordelunaAndroidDisplay)
+
+# Essentials stores event diagnostics outside Exception#message. The native
+# mkxp-z dialog calls #message, which otherwise returns only "EventScriptError".
+# Define the same class early: Essentials reopens it when its scripts load.
+module NordelunaAndroidEventErrorMessage
+  def message
+    details = instance_variable_get(:@event_message)
+    return super unless details.is_a?(String) && !details.empty?
+    unless @nordeluna_details_logged
+      @nordeluna_details_logged = true
+      begin
+        directory = Dir.pwd
+        File.open(File.join(directory, "nordeluna-event-errors.log"), "ab") do |log|
+          log.write("\n[#{Time.now}]\n#{details}\n")
+        end
+      rescue StandardError
+        # Logging must never replace or suppress the original exception.
+      end
+    end
+    details
+  end
+end
+
+class EventScriptError < Exception
+  prepend NordelunaAndroidEventErrorMessage unless ancestors.include?(NordelunaAndroidEventErrorMessage)
+end
