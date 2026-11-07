@@ -174,7 +174,7 @@ module NordelunaOnline
       session = Session.new(url, reply)
       session.rules = reply["rules"]
       raise Error, "As regras da sala mudaram. Crie outra sala." if mode == "battle" && reply["rules"] != rule_id
-      pbMessage(_INTL("Sala: {1}. Envie esse codigo ao outro jogador. VOLTAR cancela a espera.", session.code)) unless join
+      show_room_code(session.code) unless join
       room = session.wait_for { |r| r["players"].length == 2 }
       mode == "battle" ? start_battle(session, room) : start_trade(session, room, slot)
     ensure

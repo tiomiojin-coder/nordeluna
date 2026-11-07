@@ -168,7 +168,7 @@ channel.instance_variable_set(:@queued, 'wave')
 channel.instance_variable_set(:@next_poll, 0)
 channel.update
 worker = channel.instance_variable_get(:@worker)
-check(worker.is_a?(Thread), 'map transport blocked the main thread')
+check(worker.is_a?(NordelunaOnline::Transport::DesktopTicket), 'map transport did not use a non-blocking ticket')
 worker.join
 channel.collect
 check($map_worker_thread != Thread.current, 'HTTP map poll used rendering thread')

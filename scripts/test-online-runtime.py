@@ -80,6 +80,7 @@ databox = cbui[cbui.index("class Battle::Scene::PokemonDataBox < Sprite"):cbui.i
 chunks.append(("actual CBUI data box", "class Sprite; end unless defined?(Sprite)\n" + databox))
 chunks.append(("local perspective and online UX", (Path(__file__).resolve().parent / "fixtures/online-experience.fixture").read_text(encoding="utf-8")))
 chunks.append(("nick, custom rules, doubles and map emotes", (Path(__file__).resolve().parent / "fixtures/online-social.fixture").read_text(encoding="utf-8")))
+chunks.append(("Android transport and clipboard", (Path(__file__).resolve().parent / "fixtures/online-transport.fixture").read_text(encoding="utf-8")))
 state = ctypes.c_int()
 # ctypes embeds Ruby without a native Ruby main stack. Disable conservative GC
 # in this short-lived test process, as its stack scanner cannot scan Python's.

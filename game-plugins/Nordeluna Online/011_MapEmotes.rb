@@ -44,6 +44,8 @@ module NordelunaOnline
         end
         collect
       rescue StandardError => error
+        @worker.cancel if @worker
+        @worker = nil
         @error = error.message
         @token = nil
         @queued = @sent_emote = nil
@@ -53,7 +55,7 @@ module NordelunaOnline
 
       def check_timeout
         return unless @worker && @worker.alive? && NordelunaOnline.now >= @worker_deadline
-        @worker.kill
+        @worker.cancel
         @worker = nil
         @token = nil
         @sent_emote = nil
@@ -169,19 +171,13 @@ module NordelunaOnline
           @sent_position = position
           @sent_emote = @queued
           @queued = nil
-          body = JSON.dump({ "protocol" => PROTOCOL, "action" => "map_update", "token" => @token,
-            "state" => @sent_position, "emote" => @sent_emote })
-          endpoint = @url + "/api"
           @worker_deadline = NordelunaOnline.now + REQUEST_TIMEOUT
-          @worker = Thread.new do
-            begin
-              HTTPLite.post_body(endpoint, body, "application/json", { "Accept" => "application/json" })
-            rescue StandardError
-              nil
-            end
-          end
+          @worker = Transport.start(@url, { "action" => "map_update", "token" => @token,
+            "state" => @sent_position, "emote" => @sent_emote })
           @next_poll = NordelunaOnline.now + 1.0
         rescue StandardError => error
+          @worker.cancel if @worker
+          @worker = nil
           @error = error.message
           @token = nil
           @queued = @sent_emote = nil

@@ -1,0 +1,92 @@
+module System
+  def self.is_android?; true; end
+end
+module HTTPLite
+  def self.post_body(*args); raise 'Android called unsafe native HTTPLite'; end
+end
+# The Python-embedded DLL has no supported Ruby I/O stack. Test its mailbox
+# contract in memory; the standalone Java integration exercises actual files/HTTP.
+$bridge_files = {}
+module BridgeFixtureFiles
+  def bridge_path?(path); path.to_s.include?('.nordeluna-online-bridge'); end
+  def binwrite(path, text); return super unless bridge_path?(path); $bridge_files[File.expand_path(path)] = text.dup; text.bytesize; end
+  def binread(path)
+    return super unless bridge_path?(path)
+    $bridge_files.fetch(File.expand_path(path)) { raise Errno::ENOENT, path }
+  end
+  def file?(path); bridge_path?(path) ? $bridge_files.key?(File.expand_path(path)) : super; end
+  def size(path); bridge_path?(path) ? binread(path).bytesize : super; end
+  def mtime(path); bridge_path?(path) ? Time.now : super; end
+  def rename(a, b); return super unless bridge_path?(a); $bridge_files[File.expand_path(b)] = $bridge_files.delete(File.expand_path(a)); 0; end
+  def delete(path); return super unless bridge_path?(path); $bridge_files.delete(File.expand_path(path)); 1; end
+end
+File.singleton_class.prepend(BridgeFixtureFiles)
+module BridgeFixtureDir
+  def glob(pattern, *args)
+    return super unless pattern.include?('.nordeluna-online-bridge')
+    $bridge_files.keys.select { |path| File.fnmatch?(File.expand_path(pattern), path) }
+  end
+end
+Dir.singleton_class.prepend(BridgeFixtureDir)
+module NordelunaOnline
+  class << self
+    alias frame_before_bridge_test frame
+    def frame
+      directory = File.join(Dir.pwd, '.nordeluna-online-bridge')
+      Dir.glob(File.join(directory, '*.request')).each do |file|
+        session, endpoint, body = File.binread(file).split("\n", 3)
+        check(session == 'test-session', 'request session changed')
+        check(endpoint == 'https://example.org/api', 'request URL changed')
+        payload = JSON.parse(body)
+        check(payload['protocol'] == 1, 'protocol missing from safe transport')
+        if $bridge_pause_test
+          File.binwrite(File.join(directory, 'status'), '0')
+        else
+          File.binwrite(file.sub(/\.request\z/, '.response'), "200\n" + JSON.dump({'ok'=>true, 'nick'=>'Lúna'}))
+          File.delete(file)
+        end
+      end
+      frame_before_bridge_test
+    end
+  end
+end
+begin
+  File.binwrite('.nordeluna-online-bridge/session', 'test-session')
+  File.binwrite('.nordeluna-online-bridge/status', '1')
+  threads_before = Thread.list.length
+  answer = NordelunaOnline.request('https://example.org', {'action'=>'health'})
+  check(answer['nick'] == 'Lúna', 'Android bridge corrupted UTF-8')
+  check(Thread.list.length == threads_before, 'Android transport created Ruby worker threads')
+  $bridge_pause_test = true
+  begin
+    NordelunaOnline.request('https://example.org', {'action'=>'health'})
+    raise 'paused transport reported success'
+  rescue NordelunaOnline::ConnectionLost
+  end
+  check(Dir.glob('.nordeluna-online-bridge/*.cancel').length == 1, 'timeout/pause did not send cooperative cancellation')
+ensure
+  module NordelunaOnline
+    class << self; alias frame frame_before_bridge_test; end
+  end
+end
+
+# Copy exactly the public code, never the session token or an invitation URL.
+module Input
+  def self.clipboard=(value); $copied_room_code = value; end
+end
+alias pbMessage_before_clipboard_test pbMessage
+def pbMessage(text, commands = nil, *args)
+  commands ? $room_menu_choices.shift : nil
+end
+$room_menu_choices = [0, 1]
+NordelunaOnline.show_room_code('ABCDEFGH')
+check($copied_room_code == 'ABCDEFGH', 'clipboard did not receive room code')
+$room_menu_choices = [2]
+begin
+  NordelunaOnline.show_room_code('ABCDEFGH')
+  raise 'cancel room ignored'
+rescue NordelunaOnline::Cancelled
+end
+rejects('clipboard accepted arbitrary content') { NordelunaOnline.show_room_code('token:secret') }
+alias pbMessage pbMessage_before_clipboard_test
+'OK: Android uses mailbox transport without native HTTP/Ruby worker threads; pause aborts safely; room code copies exactly and cancellation remains available.'

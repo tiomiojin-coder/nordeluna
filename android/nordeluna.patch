@@ -1,5 +1,5 @@
 diff --git a/android/app/build.gradle b/android/app/build.gradle
-index 036a159..3cd2c3d 100644
+index 036a159..12dc641 100644
 --- a/android/app/build.gradle
 +++ b/android/app/build.gradle
 @@ -7,12 +7,12 @@ android {
@@ -13,8 +13,8 @@ index 036a159..3cd2c3d 100644
 -        versionCode 1
 -        versionName "0.1.0"
 -        archivesBaseName = "mkxp-z-$versionName"
-+        versionCode 18
-+        versionName "1.10.0"
++        versionCode 17
++        versionName "1.11.0"
 +        archivesBaseName = "Nordeluna-Android-$versionName"
          // Native ABIs are produced by build.sh (see ../build.sh) and placed
          // under src/main/jniLibs/. Everything present there is packaged.
@@ -124,7 +124,7 @@ index 0000000..0ab7cff
 +    }
 +}
 diff --git a/android/app/src/main/java/com/mkxpz/MainActivity.java b/android/app/src/main/java/com/mkxpz/MainActivity.java
-index be544a2..9cbc803 100644
+index be544a2..592f8d2 100644
 --- a/android/app/src/main/java/com/mkxpz/MainActivity.java
 +++ b/android/app/src/main/java/com/mkxpz/MainActivity.java
 @@ -3,21 +3,31 @@ package com.mkxpz;
@@ -175,7 +175,7 @@ index be544a2..9cbc803 100644
  import android.util.Log;
  import android.util.TypedValue;
  import java.util.Locale;
-@@ -35,18 +51,31 @@ import java.util.ArrayList;
+@@ -35,18 +51,32 @@ import java.util.ArrayList;
  import java.util.List;
  import java.io.File;
  import java.io.FileInputStream;
@@ -204,10 +204,11 @@ index be544a2..9cbc803 100644
  import com.mkxpz.launcher.SaveTransfer;
 +import com.mkxpz.launcher.ErrorReport;
 +import com.mkxpz.launcher.CrashDiagnostics;
++import com.mkxpz.launcher.OnlineBridge;
  
  public class MainActivity extends SDLActivity
  {
-@@ -65,10 +94,24 @@ public class MainActivity extends SDLActivity
+@@ -65,10 +95,24 @@ public class MainActivity extends SDLActivity
  
      private static final String PREFS_NAME = "mkxpz_prefs";
      private static final String PREFS_GAME_PATH = "game_path";
@@ -232,7 +233,7 @@ index be544a2..9cbc803 100644
  
      protected boolean mStarted = false;
  
-@@ -87,19 +130,69 @@ public class MainActivity extends SDLActivity
+@@ -87,19 +131,78 @@ public class MainActivity extends SDLActivity
      // In-screen gamepad
      private final Gamepad mGamepad = new Gamepad();
      private boolean mGamepadInvisible = false;
@@ -252,6 +253,7 @@ index be544a2..9cbc803 100644
 +    private boolean mPausedForAudioFocus = false;
 +    private boolean mWhatsNewScheduled = false;
 +    private boolean mCrashNoticeScheduled = false;
++    private OnlineBridge mOnlineBridge;
 +
 +    private final AudioManager.OnAudioFocusChangeListener mAudioFocusListener = focusChange -> {
 +        if (mMainHandler == null)
@@ -288,6 +290,14 @@ index be544a2..9cbc803 100644
  
      private void runSDLThread()
      {
++        if (mOnlineBridge == null) {
++            try {
++                mOnlineBridge = new OnlineBridge(new File(GAME_PATH));
++                mOnlineBridge.setResumed(mActivityResumed);
++            } catch (IOException error) {
++                Log.e(TAG, "Online transport unavailable", error);
++            }
++        }
          if (!mStarted) {
 +            int displayMode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(
 +                PREFS_DISPLAY_MODE, SideMenu.DISPLAY_KEEP_ASPECT);
@@ -304,7 +314,7 @@ index be544a2..9cbc803 100644
  
          // Run (resume) native SDL thread
          if (mHasMultiWindow) {
-@@ -153,6 +246,9 @@ public class MainActivity extends SDLActivity
+@@ -153,6 +256,9 @@ public class MainActivity extends SDLActivity
              if (resultCode == RESULT_OK && data != null && data.getData() != null) {
                  exportSaves(data.getData());
              }
@@ -314,7 +324,7 @@ index be544a2..9cbc803 100644
          }
      }
  
-@@ -176,7 +272,28 @@ public class MainActivity extends SDLActivity
+@@ -176,7 +282,28 @@ public class MainActivity extends SDLActivity
          GAME_PATH_DEFAULT = new File(gameRootBase, "mkxp-z").getAbsolutePath();
          GAME_PATH = GAME_PATH_DEFAULT;
  
@@ -343,7 +353,7 @@ index be544a2..9cbc803 100644
  
          mStorageManager = (StorageManager) getSystemService(STORAGE_SERVICE);
          mVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
-@@ -196,9 +313,12 @@ public class MainActivity extends SDLActivity
+@@ -196,9 +323,12 @@ public class MainActivity extends SDLActivity
          }
  
          // Setup in-screen gamepad
@@ -357,7 +367,7 @@ index be544a2..9cbc803 100644
          mGamepad.setOnKeyDownListener(SDLActivity::onNativeKeyDown);
          mGamepad.setOnKeyUpListener(SDLActivity::onNativeKeyUp);
  
-@@ -206,7 +326,7 @@ public class MainActivity extends SDLActivity
+@@ -206,7 +336,7 @@ public class MainActivity extends SDLActivity
              mGamepad.attachTo(this, mLayout);
          }
  
@@ -366,7 +376,7 @@ index be544a2..9cbc803 100644
          tvFps = new TextView(this);
          tvFps.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
          tvFps.setTextColor(Color.WHITE);
-@@ -220,14 +340,16 @@ public class MainActivity extends SDLActivity
+@@ -220,14 +350,16 @@ public class MainActivity extends SDLActivity
          tvFps.setPadding(dpPx(10), dpPx(4), dpPx(10), dpPx(4));
          tvFps.setVisibility(View.GONE);
  
@@ -386,7 +396,7 @@ index be544a2..9cbc803 100644
          String savedGamePath = prefs.getString(PREFS_GAME_PATH, null);
          if (savedGamePath != null && new File(savedGamePath).isDirectory()) {
              GAME_PATH = savedGamePath;
-@@ -240,13 +362,30 @@ public class MainActivity extends SDLActivity
+@@ -240,13 +372,30 @@ public class MainActivity extends SDLActivity
          mSideMenu = new SideMenu(this, mLayout);
          mSideMenu.setGamePath(GAME_PATH);
          mSideMenu.setFpsOverlayEnabled(fpsOverlayEnabled);
@@ -420,7 +430,7 @@ index be544a2..9cbc803 100644
      }
  
      @Override
-@@ -261,16 +400,16 @@ public class MainActivity extends SDLActivity
+@@ -261,16 +410,16 @@ public class MainActivity extends SDLActivity
  
                  // Try to mount main OBB file
                  mStorageManager.mountObb(OBB_MAIN_FILENAME, null, obbListener);
@@ -442,7 +452,7 @@ index be544a2..9cbc803 100644
              }
          } else {
              // onStart: Resume SDL thread
-@@ -278,9 +417,34 @@ public class MainActivity extends SDLActivity
+@@ -278,9 +427,37 @@ public class MainActivity extends SDLActivity
          }
      }
  
@@ -451,6 +461,7 @@ index be544a2..9cbc803 100644
 +    {
 +        super.onResume();
 +        mActivityResumed = true;
++        if (mOnlineBridge != null) mOnlineBridge.setResumed(true);
 +        requestGameAudioFocus();
 +        mPausedForAudioFocus = false;
 +        SDLAudioManager.setPlaybackPaused(false);
@@ -463,6 +474,7 @@ index be544a2..9cbc803 100644
 +    protected void onPause()
 +    {
 +        mActivityResumed = false;
++        if (mOnlineBridge != null) mOnlineBridge.setResumed(false);
 +        SDLAudioManager.setPlaybackPaused(true);
 +        abandonGameAudioFocus();
 +        super.onPause();
@@ -471,13 +483,14 @@ index be544a2..9cbc803 100644
      @Override
      protected void onDestroy()
      {
++        if (mOnlineBridge != null) mOnlineBridge.close();
 +        if (mInputManager != null)
 +            mInputManager.unregisterInputDeviceListener(mInputDeviceListener);
 +        abandonGameAudioFocus();
          super.onDestroy();
  
          // HACK: Exiting the JVM (process) since Ruby does not like when we
-@@ -289,22 +453,139 @@ public class MainActivity extends SDLActivity
+@@ -289,22 +466,139 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
@@ -497,18 +510,7 @@ index be544a2..9cbc803 100644
 +
 +    @SuppressWarnings("deprecation")
 +    private void abandonGameAudioFocus()
-     {
--        if (
--            evt.getKeyCode() != KeyEvent.KEYCODE_BACK &&
--            evt.getKeyCode() != KeyEvent.KEYCODE_VOLUME_UP &&
--            evt.getKeyCode() != KeyEvent.KEYCODE_VOLUME_DOWN &&
--            evt.getKeyCode() != KeyEvent.KEYCODE_VOLUME_MUTE &&
--            evt.getKeyCode() != KeyEvent.KEYCODE_HEADSETHOOK
--        ) {
--            // Hide gamepad view on key events when visible
--            if (!mGamepadInvisible) {
--                mGamepad.hideView();
--                mGamepadInvisible = true;
++    {
 +        if (mAudioManager != null)
 +            mAudioManager.abandonAudioFocus(mAudioFocusListener);
 +    }
@@ -527,12 +529,23 @@ index be544a2..9cbc803 100644
 +            if (mStarted && mActivityResumed && mPausedForAudioFocus) {
 +                mPausedForAudioFocus = false;
 +                resumeNativeThread();
-             }
-         }
++            }
++        }
 +    }
 +
 +    private void scheduleControllerRescan()
-+    {
+     {
+-        if (
+-            evt.getKeyCode() != KeyEvent.KEYCODE_BACK &&
+-            evt.getKeyCode() != KeyEvent.KEYCODE_VOLUME_UP &&
+-            evt.getKeyCode() != KeyEvent.KEYCODE_VOLUME_DOWN &&
+-            evt.getKeyCode() != KeyEvent.KEYCODE_VOLUME_MUTE &&
+-            evt.getKeyCode() != KeyEvent.KEYCODE_HEADSETHOOK
+-        ) {
+-            // Hide gamepad view on key events when visible
+-            if (!mGamepadInvisible) {
+-                mGamepad.hideView();
+-                mGamepadInvisible = true;
 +        if (mMainHandler == null || !mStarted)
 +            return;
 +        mMainHandler.removeCallbacks(mControllerRescanRunnable);
@@ -550,13 +563,13 @@ index be544a2..9cbc803 100644
 +                updateControllerButtons();
 +                if (mControllerAxesView != null)
 +                    mControllerAxesView.setText(R.string.controller_buttons_idle);
-+            }
+             }
 +            refreshTouchControlsVisibility();
 +            updateControllerStatus();
 +            Log.i(TAG, "Bluetooth/USB controller list refreshed");
 +        } catch (Exception e) {
 +            Log.w(TAG, "Controller rescan failed", e);
-+        }
+         }
 +    };
 +
 +    private void scheduleWhatsNew()
@@ -630,7 +643,7 @@ index be544a2..9cbc803 100644
  
          if (mGamepad.processGamepadEvent(evt))
              return true;
-@@ -315,11 +596,9 @@ public class MainActivity extends SDLActivity
+@@ -315,11 +609,9 @@ public class MainActivity extends SDLActivity
      @Override
      public boolean dispatchTouchEvent(MotionEvent evt)
      {
@@ -644,7 +657,7 @@ index be544a2..9cbc803 100644
              mGamepad.showView();
              mGamepadInvisible = false;
          }
-@@ -330,12 +609,20 @@ public class MainActivity extends SDLActivity
+@@ -330,12 +622,20 @@ public class MainActivity extends SDLActivity
      @Override
      public boolean onGenericMotionEvent(MotionEvent evt)
      {
@@ -665,7 +678,7 @@ index be544a2..9cbc803 100644
      /**
       * This method is for arguments for launching native mkxp-z.
       *
-@@ -392,6 +679,611 @@ public class MainActivity extends SDLActivity
+@@ -392,6 +692,611 @@ public class MainActivity extends SDLActivity
              tvFps.setVisibility(View.GONE);
      }
  
@@ -1277,7 +1290,7 @@ index be544a2..9cbc803 100644
      /**
       * This static method is used in native mkxp-z. (see systemImpl.cpp)
       * This method returns a string of current device locale tag. (e.g. "en_US")
-@@ -488,6 +1380,7 @@ public class MainActivity extends SDLActivity
+@@ -488,6 +1393,7 @@ public class MainActivity extends SDLActivity
          intent.setType("*/*");
          // .rxdata/.rvdata files have no standard MIME type.
          intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
@@ -1285,7 +1298,7 @@ index be544a2..9cbc803 100644
              "application/octet-stream",
              "application/x-rpgmaker"
          });
-@@ -496,15 +1389,26 @@ public class MainActivity extends SDLActivity
+@@ -496,15 +1402,26 @@ public class MainActivity extends SDLActivity
      }
  
      /**
@@ -1315,7 +1328,7 @@ index be544a2..9cbc803 100644
      /**
       * The directories where the game may keep its save files. RPG Maker's
       * {@code save_data} writes into the game folder, but games that use
-@@ -549,64 +1453,104 @@ public class MainActivity extends SDLActivity
+@@ -549,64 +1466,104 @@ public class MainActivity extends SDLActivity
          final File[] roots = saveRoots();
  
          new Thread(() -> {
@@ -1446,7 +1459,7 @@ index be544a2..9cbc803 100644
      }
  
      /**
-@@ -681,6 +1625,116 @@ public class MainActivity extends SDLActivity
+@@ -681,6 +1638,116 @@ public class MainActivity extends SDLActivity
          }).start();
      }
  
@@ -1563,7 +1576,7 @@ index be544a2..9cbc803 100644
      /**
       * Searches for the directory that actually contains a game, starting from
       * {@code root} and descending into its subdirectories.
-@@ -810,33 +1864,4 @@ public class MainActivity extends SDLActivity
+@@ -810,33 +1877,4 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
@@ -1950,10 +1963,10 @@ index 0e8b645..5b904e7 100644
 +}
 diff --git a/android/app/src/main/java/com/mkxpz/launcher/ErrorReport.java b/android/app/src/main/java/com/mkxpz/launcher/ErrorReport.java
 new file mode 100644
-index 0000000..87cb9d5
+index 0000000..3f9f906
 --- /dev/null
 +++ b/android/app/src/main/java/com/mkxpz/launcher/ErrorReport.java
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,100 @@
 +package com.mkxpz.launcher;
 +
 +import android.content.Context;
@@ -2005,6 +2018,7 @@ index 0000000..87cb9d5
 +                    new File(gamePath, "nordeluna-event-errors.log"));
 +                addGameLog(zip, "game-errorlog.txt", new File(gamePath, "errorlog.txt"));
 +                addGameLog(zip, "online-errors.log", new File(gamePath, "nordeluna-online-errors.log"));
++                addGameLog(zip, "online-transport.log", new File(gamePath, "nordeluna-online-transport.log"));
 +            }
 +        }
 +    }
@@ -3218,7 +3232,7 @@ index 7c821a4..c5f9920 100644
      public static void captureClose() {
          if (mAudioRecord != null) {
 diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
-index 9e37fed..d879a34 100644
+index 9e37fed..f1d73ea 100644
 --- a/android/app/src/main/res/values/strings.xml
 +++ b/android/app/src/main/res/values/strings.xml
 @@ -1,11 +1,65 @@
@@ -3289,6 +3303,6 @@ index 9e37fed..d879a34 100644
 +    <string name="mix_external_audio">Permitir música de outros aplicativos</string>
 +    <string name="mix_external_audio_hint">Ativado por padrão: Spotify, YouTube Music e outros podem tocar junto com o jogo.</string>
 +    <string name="whats_new_title">Novidades da versão %1$s</string>
-+    <string name="whats_new_message">• Nick online salvo e editável, separado do protagonista da história.\n\n• Salas com nível atual ou fixo, equipe de 1 a 6 Pokémon, regra de lendários e batalhas simples ou duplas.\n\n• Emotes no mapa: acenar, comemorar e chamar para batalha, com intervalo de 3 segundos. Salas personalizadas e emotes precisam do servidor revisão 3.\n\n• Seu Pokémon embaixo, teste de conexão e interrupção sem vitória por queda.\n\n• Confirmação das trocas, comprovantes no save e recuperação pendente.\n\n• Diagnóstico do fechamento anterior e exportação do relatório, quando disponível no Android.\n\n• Atualização do jogo Nordeluna.</string>
++    <string name="whats_new_message">• Online Android com transporte de rede separado da VM do jogo para evitar o caminho nativo inseguro.\n\n• Limites de tempo e resposta; interrupção segura ao pausar e reconexão sem reaproveitar pedidos antigos.\n\n• Copiar código da sala para colar no WhatsApp ou compartilhar com outro jogador.\n\n• Diagnóstico de transporte incluído no relatório de erro, sem códigos privados ou dados dos Pokémon.\n\n• Mantidos nick, salas personalizadas, duplas, emotes e recuperação de trocas. Atualize os dois jogos para esta versão.</string>
 +    <string name="got_it">Entendi</string>
  </resources>
