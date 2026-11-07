@@ -13,7 +13,7 @@ index 036a159..3cd2c3d 100644
 -        versionCode 1
 -        versionName "0.1.0"
 -        archivesBaseName = "mkxp-z-$versionName"
-+        versionCode 17
++        versionCode 18
 +        versionName "1.10.0"
 +        archivesBaseName = "Nordeluna-Android-$versionName"
          // Native ABIs are produced by build.sh (see ../build.sh) and placed
