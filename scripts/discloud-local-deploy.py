@@ -10,8 +10,6 @@ import queue
 import sqlite3
 import threading
 import time
-import tkinter as tk
-from tkinter import ttk
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -207,6 +205,10 @@ def deploy(token, package, notify):
 
 
 def main():
+    # The deploy/backup functions also run in headless CI, without Tk installed.
+    import tkinter as tk
+    from tkinter import ttk
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--package", type=Path, required=True)
     parser.add_argument("--status", type=Path, default=ROOT / ".cache/discloud-deploy/status.json")

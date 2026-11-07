@@ -17,6 +17,18 @@ builder = importlib.util.module_from_spec(spec); spec.loader.exec_module(builder
 
 
 class DiscloudDeployTests(unittest.TestCase):
+    def test_deploy_core_imports_without_graphical_toolkit(self):
+        real_import = __import__
+        def headless_import(name, *args, **kwargs):
+            if name == "tkinter" or name.startswith("tkinter."):
+                raise ModuleNotFoundError("No module named 'tkinter'")
+            return real_import(name, *args, **kwargs)
+        spec = importlib.util.spec_from_file_location("headless_deploy", ROOT / "scripts/discloud-local-deploy.py")
+        module = importlib.util.module_from_spec(spec)
+        with patch("builtins.__import__", side_effect=headless_import):
+            spec.loader.exec_module(module)
+        self.assertTrue(callable(module.deploy))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
