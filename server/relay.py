@@ -9,7 +9,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PROTOCOL = 1
-REVISION = 2
+REVISION = 3
 MAX_BODY = 262144
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
@@ -23,6 +23,19 @@ def require(condition, message):
         raise ProtocolError(message)
 
 
+def validate_rules(rules):
+    if isinstance(rules, str):
+        require(rules in ("free", "level50"), "Regras desconhecidas.")
+        return rules
+    require(isinstance(rules, dict) and set(rules) == {"level", "count", "legendaries", "format"}, "Regras invalidas.")
+    require(type(rules["level"]) is int and rules["level"] in (0, 25, 50, 100), "Nivel invalido.")
+    require(type(rules["count"]) is int and 1 <= rules["count"] <= 6, "Quantidade invalida.")
+    require(type(rules["legendaries"]) is bool, "Regra de lendarios invalida.")
+    require(rules["format"] in ("single", "double"), "Formato invalido.")
+    require(rules["format"] != "double" or rules["count"] >= 2, "Duplas precisam de pelo menos 2 Pokemon.")
+    return dict(rules)
+
+
 class Store:
     def __init__(self, path):
         self.lock = threading.RLock()
@@ -31,6 +44,52 @@ class Store:
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.execute("CREATE TABLE IF NOT EXISTS rooms(code TEXT PRIMARY KEY, data TEXT NOT NULL)")
         self.db.commit()
+        # Ephemeral map presence must not touch trade receipts or survive restarts.
+        self.presence = {}
+
+    def map_action(self, request):
+        now = time.monotonic()
+        self.presence = {key: row for key, row in self.presence.items() if now - row["seen"] < 15}
+        action = request["action"]
+        if action == "map_join":
+            require(len(self.presence) < 500, "Canal de mapa cheio.")
+            profile = request.get("profile")
+            require(isinstance(profile, dict), "Perfil invalido.")
+            name = profile.get("name")
+            require(isinstance(name, str) and 1 <= len(name.strip()) <= 24 and not re.search(r"[\\<>\x00-\x1f]", name), "Nick invalido.")
+            build = request.get("build")
+            require(isinstance(build, str) and 1 <= len(build) <= 100, "Build invalida.")
+            token = secrets.token_urlsafe(32)
+            self.presence[token] = {"id": secrets.token_hex(8), "name": name.strip(), "build": build,
+                                    "seen": now, "map": None, "emote": None, "last_emote": -10.0, "sequence": 0}
+            return {"token": token, "id": self.presence[token]["id"], "cooldown": 3}
+        token = request.get("token")
+        require(isinstance(token, str) and token in self.presence, "Canal de mapa expirou. Entre novamente.")
+        if action == "map_leave":
+            del self.presence[token]
+            return {}
+        require(action == "map_update", "Acao de mapa invalida.")
+        row = self.presence[token]
+        state = request.get("state")
+        require(isinstance(state, dict), "Mapa invalido.")
+        for key, maximum in (("map", 999999), ("x", 9999), ("y", 9999)):
+            require(type(state.get(key)) is int and 0 <= state[key] <= maximum, "Posicao invalida.")
+        emote = request.get("emote")
+        if emote is not None:
+            require(emote in ("wave", "celebrate", "battle"), "Emote invalido.")
+            require(now - row["last_emote"] >= 3, "Espere 3 segundos entre emotes.")
+            row["last_emote"] = now
+            row["sequence"] += 1
+            row["emote"] = emote
+        elif row["map"] != state["map"]:
+            row["emote"] = None
+        row.update(state, seen=now)
+        peers = [{"id": peer["id"], "name": peer["name"], "x": peer["x"], "y": peer["y"],
+                  "emote": peer["emote"] if now - peer["last_emote"] < 4 else None,
+                  "sequence": peer["sequence"]}
+                 for peer in self.presence.values()
+                 if peer["id"] != row["id"] and peer["build"] == row["build"] and peer["map"] == row["map"]]
+        return {"peers": peers[:40], "cooldown": 3}
 
     def save(self, room):
         self.db.execute("INSERT OR REPLACE INTO rooms VALUES(?,?)",
@@ -63,11 +122,12 @@ class Store:
         if action == "health":
             return {"protocol": PROTOCOL, "revision": REVISION, "service": "Nordeluna Online"}
         with self.lock, self.db:
+            if isinstance(action, str) and action.startswith("map_"):
+                return self.map_action(request)
             if action == "create":
                 require(request.get("mode") in ("battle", "trade"), "Modo invalido.")
                 require(isinstance(request.get("build"), str) and 1 <= len(request["build"]) <= 100, "Build invalida.")
-                rules = request.get("rules", "free")
-                require(rules in ("free", "level50"), "Regras desconhecidas.")
+                rules = validate_rules(request.get("rules", "free"))
                 # Only waiting rooms expire. Never delete a committed trade receipt.
                 now = time.time()
                 for code, data in self.db.execute("SELECT code,data FROM rooms").fetchall():
@@ -83,6 +143,7 @@ class Store:
                     code = "".join(secrets.choice(ALPHABET) for _ in range(8))
                 p = self.player(request)
                 require(request["mode"] != "trade" or len(p["payload"]) == 1, "Oferta invalida.")
+                require(request["mode"] != "battle" or not isinstance(rules, dict) or len(p["payload"]) == rules["count"], "Equipe diferente das regras da sala.")
                 room = {"code": code, "mode": request["mode"], "build": request["build"], "rules": rules, "status": "waiting",
                         "seed": secrets.randbelow(2**30), "players": [p], "exchanges": {}, "updated": now}
                 self.save(room)
@@ -90,12 +151,16 @@ class Store:
             code = request.get("code")
             require(isinstance(code, str) and re.fullmatch(r"[A-Z2-9]{8}", code), "Codigo invalido.")
             room = self.load(code)
+            if action == "inspect":
+                require(room["status"] == "waiting", "Sala cheia ou encerrada.")
+                return {"mode": room["mode"], "rules": room.get("rules", "free"), "build": room["build"]}
             if action == "join":
                 require(request.get("build") == room["build"], "As versoes do jogo sao diferentes.")
                 require(request.get("mode") == room["mode"], "Essa sala e de outro modo.")
                 require(room["status"] == "waiting" and len(room["players"]) == 1, "Sala cheia ou encerrada.")
                 p = self.player(request)
                 require(room["mode"] != "trade" or len(p["payload"]) == 1, "Oferta invalida.")
+                require(room["mode"] != "battle" or not isinstance(room.get("rules"), dict) or len(p["payload"]) == room["rules"]["count"], "Equipe diferente das regras da sala.")
                 room["players"].append(p)
                 room["status"] = "active"
                 room["updated"] = time.time()

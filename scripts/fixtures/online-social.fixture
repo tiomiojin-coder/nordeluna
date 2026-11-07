@@ -1,0 +1,178 @@
+# Nick is saved independently from story name and original Pokemon ownership.
+$game_map = nil
+def pbMessageFreeText(*args); $nick_input; end
+$nick_input = 'MeuNick'
+story_name = $player.name
+ownership = $player.party.map { |p| [p.owner.name, p.owner.id] }
+Game.save_success = true
+check(NordelunaOnline.configure_nickname, 'nick not accepted')
+check($player.name == story_name && $PokemonGlobal.nordeluna_online_nickname == 'MeuNick', 'nick changed story name')
+check($player.party.map { |p| [p.owner.name, p.owner.id] } == ownership, 'nick changed original trainer')
+loaded = Marshal.load(Marshal.dump($PokemonGlobal))
+check(loaded.nordeluna_online_nickname == 'MeuNick', 'nick lost after load')
+$nick_input = 'OutroNick'
+Game.save_success = false
+rejects('nick survived failed save') { NordelunaOnline.configure_nickname }
+check($PokemonGlobal.nordeluna_online_nickname == 'MeuNick', 'failed save did not roll nick back')
+Game.save_success = true
+NordelunaOnline.configure_nickname
+check($PokemonGlobal.nordeluna_online_nickname == 'OutroNick', 'nick could not be changed')
+['<bad>', 'a\\b', "a\nb", '', 'x' * 25].each { |name| check(!NordelunaOnline.valid_nickname?(name), 'unsafe nick accepted') }
+
+rules = { 'level'=>50, 'count'=>3, 'legendaries'=>false, 'format'=>'double' }
+check(NordelunaOnline.ruleset(rules)[:format] == 'double', 'custom format not recognized')
+rejects('double with one Pokemon accepted') { NordelunaOnline.ruleset(rules.merge('count'=>1)) }
+rejects('boolean level accepted') { NordelunaOnline.ruleset(rules.merge('level'=>true)) }
+check(NordelunaOnline.restricted_legendary?(Pokemon.new(:MEWTWO, 20, nil, false, false)), 'legendary flag not recognized')
+check(NordelunaOnline.restricted_legendary?(Pokemon.new(:MEW, 20, nil, false, false)), 'mythical flag not recognized')
+check(!NordelunaOnline.restricted_legendary?(Pokemon.new(:AIPOM, 20, nil, false, false)), 'ordinary Pokemon classified legendary')
+codec = NordelunaOnline::PokemonCodec
+ids = [[:PIKACHU, :EEVEE, :AIPOM], [:BULBASAUR, :SQUIRTLE, :CATITUX]]
+campaign = ids.map { |team| team.map { |id| Pokemon.new(id, 35, nil, false, false).tap { |p| p.moves = [Pokemon::Move.new(:TACKLE)]; p.heal } } }
+players = campaign.map { |party| { 'payload'=>party.map { |p| codec.encode(p) } } }
+before = Marshal.dump(campaign)
+teams = NordelunaOnline.prepare_online_parties(players, rules)
+check(teams.flatten.all? { |p| p.level == 50 }, 'fixed levels not applied')
+check(Marshal.dump(campaign) == before, 'rules changed campaign Pokemon')
+rejects('incorrect team length accepted') { NordelunaOnline.prepare_online_parties(players, rules.merge('count'=>2)) }
+legendary_players = [{ 'payload'=>[codec.encode(Pokemon.new(:MEWTWO, 50, nil, false, false))] }] * 2
+rejects('legendary team bypassed rules') { NordelunaOnline.prepare_online_parties(legendary_players, rules.merge('count'=>1, 'format'=>'single')) }
+
+# Full paired Essentials+Gen9 double battle: four independently commanded slots,
+# target choice, fainting, replacements and deterministic checksum/result.
+class DoubleTestLink < MemoryLink
+  attr_reader :rules
+  def initialize(side, hub, rules); super(side, hub); @rules = rules; end
+end
+class DoubleTestScene < HeadlessLinkScene
+  attr_reader :commanded, :targets
+  def pbCommandMenu(idx, first)
+    (@commanded ||= []) << idx
+    return 3 if @battle.turnCount >= 10 && idx.even?
+    0
+  end
+  def pbChooseTarget(idx, data, *args)
+    target = @battle.battlers.find { |b| b && !b.fainted? && @battle.pbMoveCanTarget?(idx, b.index, data) }
+    (@targets ||= []) << [idx, target && target.index]
+    target ? target.index : -1
+  end
+end
+hub = MemoryHub.new
+scenes = []
+trainer_type = GameData::TrainerType.keys.first
+battles = 2.times.map do |side|
+  parties = NordelunaOnline.prepare_online_parties(players, rules)
+  trainers = [NPCTrainer.new('NickHost', trainer_type), NPCTrainer.new('NickGuest', trainer_type)]
+  trainers.each_with_index { |trainer, i| trainer.party = parties[i] }
+  scenes << DoubleTestScene.new
+  NordelunaOnline::LinkBattle.new(scenes.last, parties, trainers, DoubleTestLink.new(side, hub, rules), 918273)
+end
+results = battles.map { |battle| Thread.new { battle.pbStartBattle } }.map(&:value)
+check(results[0] == results[1], 'double results diverged')
+check(battles[0].online_state == battles[1].online_state, 'double states desynchronized')
+check(scenes[0].commanded.uniq.sort == [0,2] && scenes[1].commanded.uniq.sort == [1,3], 'double commanded another trainer Pokemon')
+check(scenes.all? { |scene| scene.targets.any? }, 'double target selection not exercised')
+check(hub.packets.keys.any? { |key| key.start_with?('switch:') }, 'double replacements not exercised')
+check(Marshal.dump(campaign) == before, 'double battle changed campaign')
+guest_view = NordelunaOnline::LocalBattleView.new(battles[1], 1)
+check([0,2].all? { |i| guest_view.battlers[i].index.even? }, 'guest double bottom perspective incorrect')
+
+# Spread attacks hit multiple slots; exhausted PP keeps automatic targets
+# deterministic; simultaneous Mega is limited to one per side.
+class DoubleMegaTestScene < DoubleTestScene
+  attr_reader :mega_seen
+  def pbChangePokemon(index, pokemon)
+    (@mega_seen ||= []) << pokemon.species if pokemon.mega?
+  end
+  def pbFightMenu(idx, possible = false)
+    yield(-2) if possible
+    super(idx, false) { |move| yield(move) }
+  end
+end
+[:spread, :struggle, :mega].each do |scenario|
+  packets = [[:CHARIZARD, :EEVEE], [:BLASTOISE, :AIPOM]].each_with_index.map do |team, side|
+    team.each_with_index.map do |species, slot|
+      p = Pokemon.new(species, 50, nil, false, false)
+      p.moves = [Pokemon::Move.new(scenario == :spread ? :SURF : :TACKLE)]
+      p.item = (side == 0 ? :CHARIZARDITEX : :BLASTOISINITE) if scenario == :mega && slot == 0
+      p.heal
+      p.moves.each { |m| m.pp = 0 } if scenario == :struggle
+      codec.encode(p)
+    end
+  end
+  scenario_rules = rules.merge('count'=>2)
+  hub = MemoryHub.new
+  scenario_scenes = []
+  runs = 2.times.map do |side|
+    parties = packets.map { |party| party.map { |packet| codec.decode(packet) } }
+    trainers = [NPCTrainer.new('NickHost', trainer_type), NPCTrainer.new('NickGuest', trainer_type)]
+    scenario_scenes << DoubleMegaTestScene.new
+    NordelunaOnline::LinkBattle.new(scenario_scenes.last, parties, trainers,
+      DoubleTestLink.new(side, hub, scenario_rules), 192837)
+  end
+  decisions = runs.map { |b| Thread.new { b.pbStartBattle } }.map(&:value)
+  check(decisions[0] == decisions[1] && runs[0].online_state == runs[1].online_state, "double #{scenario} desynchronized")
+  if scenario == :mega
+    check(hub.packets['turn:0'].values.all? { |row| row['actions'].count { |a| a['mega'] } == 1 }, 'double Mega not limited to one per side')
+    check(scenario_scenes.all? { |scene| scene.mega_seen && scene.mega_seen.uniq.length == 2 }, 'double Mega mechanics not applied')
+  end
+end
+
+# Render, de-duplicate, expire and hide map bubbles using display doubles.
+class Bitmap < PreviewBitmap
+  def initialize(*args); super(); end
+  def dispose; @disposed = true; end
+  def disposed?; !!@disposed; end
+end
+class Sprite
+  attr_accessor :bitmap, :x, :y, :z, :visible
+  def dispose; @disposed = true; end
+  def disposed?; !!@disposed; end
+end
+$game_map = Struct.new(:map_id, :display_x, :display_y, :interpreter).new(7, 0, 0, Object.new)
+$game_map.interpreter.define_singleton_method(:running?) { false }
+$game_player = Struct.new(:x, :y).new(3, 4)
+channel = NordelunaOnline::MapChannel
+channel.instance_variable_set(:@token, 'map-token')
+channel.instance_variable_set(:@last_emote, -10)
+channel.instance_variable_set(:@sequences, {})
+channel.send_emote('wave')
+rejects('multiple queued emotes allowed') { channel.send_emote('battle') }
+channel.instance_variable_set(:@queued, nil)
+channel.instance_variable_set(:@last_emote, NordelunaOnline.now)
+rejects('client emote cooldown bypassed') { channel.send_emote('battle') }
+channel.receive({'id'=>'peer', 'name'=>'Sol', 'x'=>4, 'y'=>4, 'emote'=>'wave', 'sequence'=>1})
+bubbles = channel.instance_variable_get(:@bubbles)
+original = bubbles['peer'][:sprite]
+channel.receive({'id'=>'peer', 'name'=>'Sol', 'x'=>4, 'y'=>4, 'emote'=>'wave', 'sequence'=>1})
+check(bubbles['peer'][:sprite].equal?(original), 'same emote replayed each poll')
+channel.update_bubbles(false)
+check(!original.visible, 'emote visible over battle/menu')
+bubbles['peer'][:until] = 0
+channel.update_bubbles(true)
+check(original.disposed? && original.bitmap.disposed? && bubbles.empty?, 'expired emote leaked graphics')
+channel.instance_variable_set(:@token, nil)
+
+# The map transport runs without pausing movement, and rendering stays on main.
+module HTTPLite
+  def self.post_body(url, body, *args)
+    $map_worker_thread = Thread.current
+    {body: '{"ok":true,"peers":[{"id":"friend","name":"Lua","x":3,"y":4,"emote":"celebrate","sequence":2}]}'}
+  end
+end
+$game_temp = Struct.new(:in_battle, :in_menu, :message_window_showing).new(false, false, false)
+channel.instance_variable_set(:@token, 'test-token')
+channel.instance_variable_set(:@id, 'self')
+channel.instance_variable_set(:@url, 'https://example.org')
+channel.instance_variable_set(:@queued, 'wave')
+channel.instance_variable_set(:@next_poll, 0)
+channel.update
+worker = channel.instance_variable_get(:@worker)
+check(worker.is_a?(Thread), 'map transport blocked the main thread')
+worker.join
+channel.collect
+check($map_worker_thread != Thread.current, 'HTTP map poll used rendering thread')
+check(channel.instance_variable_get(:@bubbles).length == 2, 'own/peer emotes not rendered after server acknowledgement')
+channel.dispose_bubbles
+channel.instance_variable_set(:@token, nil)
+'OK: saved/editable nick without story/OT changes; custom level/team/legendary rules; real synchronized double battle with targets and replacements; emote cooldown, deduplication and sprite cleanup.'

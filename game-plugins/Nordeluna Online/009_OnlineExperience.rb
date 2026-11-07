@@ -217,8 +217,8 @@ module NordelunaOnline
         end
         labels = [_INTL("Testar conexao"), _INTL("PvP: criar sala"), _INTL("PvP: entrar em sala"),
           _INTL("Troca: criar sala"), _INTL("Troca: entrar em sala"), _INTL("Comprovantes de troca"),
-          _INTL("Servidor"), _INTL("Sair")]
-        choice = pbMessage(_INTL("Nordeluna Online - {1}", VERSION), labels, labels.length)
+          _INTL("Servidor"), _INTL("Meu nick"), _INTL("Emotes no mapa"), _INTL("Sair")]
+        choice = pbMessage(_INTL("Nordeluna Online - {1}\nNick: {2}", VERSION, nickname), labels, labels.length)
         case choice
         when 0 then test_connection
         when 1 then connect("battle", false)
@@ -227,6 +227,8 @@ module NordelunaOnline
         when 4 then connect("trade", true)
         when 5 then show_trade_history
         when 6 then configure_server
+        when 7 then configure_nickname
+        when 8 then map_emotes_menu
         else return
         end
       end

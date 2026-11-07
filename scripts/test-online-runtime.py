@@ -50,7 +50,10 @@ for p in sorted((gen9 / "[001] Battle").glob("*.rb")):
 for group in ("[003] Moves", "[004] Abilities", "[005] Items"):
     for p in sorted((gen9 / group).glob("*.rb")):
         chunks.append(("gen9 " + group + " " + p.name, p.read_text(encoding="utf-8")))
-for p in sorted((PLUGINS / "Nordeluna Online").glob("*.rb")):
+maintained = Path(__file__).resolve().parents[1] / "game-plugins/Nordeluna Online"
+sources = {p.name: p for p in (PLUGINS / "Nordeluna Online").glob("*.rb")}
+sources.update({p.name: p for p in maintained.glob("*.rb")})
+for p in (sources[name] for name in sorted(sources)):
     chunks.append((p.name, p.read_text(encoding="utf-8")))
 chunks.append(("checks", (HERE / "checks.fixture").read_text(encoding="utf-8")))
 chunks.append(("battle checks", (HERE / "battle.fixture").read_text(encoding="utf-8")))
@@ -76,6 +79,7 @@ cbui = (PLUGINS / "Customizable Battle UI/001_Script.rb").read_text(encoding="ut
 databox = cbui[cbui.index("class Battle::Scene::PokemonDataBox < Sprite"):cbui.index("class Battle::Scene::AbilitySplashBar < Sprite")]
 chunks.append(("actual CBUI data box", "class Sprite; end unless defined?(Sprite)\n" + databox))
 chunks.append(("local perspective and online UX", (Path(__file__).resolve().parent / "fixtures/online-experience.fixture").read_text(encoding="utf-8")))
+chunks.append(("nick, custom rules, doubles and map emotes", (Path(__file__).resolve().parent / "fixtures/online-social.fixture").read_text(encoding="utf-8")))
 state = ctypes.c_int()
 # ctypes embeds Ruby without a native Ruby main stack. Disable conservative GC
 # in this short-lived test process, as its stack scanner cannot scan Python's.
