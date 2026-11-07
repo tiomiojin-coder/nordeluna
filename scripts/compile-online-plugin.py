@@ -58,6 +58,9 @@ Marshal.dump(bundle).unpack1("H*")
         archive.writestr("Data/PluginScripts.rxdata", compiled)
         for path in [*sorted(source.glob("*.rb")), source / "meta.txt"]:
             archive.write(path, "Plugins/Nordeluna Online/" + path.name)
+        for path in sorted((source / "bridge").glob("*")):
+            if path.is_file() and path.suffix in (".exe", ".cs"):
+                archive.write(path, "Plugins/Nordeluna Online/bridge/" + path.name)
     if install:
         if bundle_path.read_bytes() != original:
             raise RuntimeError("Game bundle changed during compilation. Close the editor and retry.")

@@ -228,7 +228,7 @@ module NordelunaOnline
         when 5 then show_trade_history
         when 6 then configure_server
         when 7 then configure_nickname
-        when 8 then map_emotes_menu
+        when 8 then return :sent if map_emotes_menu == :sent
         else return
         end
       end

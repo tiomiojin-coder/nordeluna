@@ -36,7 +36,7 @@ public final class OnlineBridge implements AutoCloseable {
         log = new File(game, "nordeluna-online-transport.log");
         File[] old = directory.listFiles();
         if (old != null) for (File file : old) if (owned(file)) file.delete();
-        write(new File(directory, "session"), session);
+        writeMarker("session", session);
         scanner.scheduleWithFixedDelay(this::tick, 0, 50, TimeUnit.MILLISECONDS);
     }
 
@@ -66,7 +66,7 @@ public final class OnlineBridge implements AutoCloseable {
             if (now - heartbeat >= 1000) {
                 synchronized (markerLock) {
                     if (closed) return;
-                    write(new File(directory, "status"), resumed ? "1" : "0");
+                    writeMarker("status", resumed ? "1" : "0");
                 }
                 heartbeat = now;
             }
@@ -165,6 +165,18 @@ public final class OnlineBridge implements AutoCloseable {
     private static void write(File file, String value) throws IOException {
         try (FileOutputStream output = new FileOutputStream(file)) {
             output.write(value.getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    private void writeMarker(String name, String value) throws IOException {
+        File temporary = new File(directory, name + ".writing");
+        File destination = new File(directory, name);
+        write(temporary, value);
+        if (!temporary.renameTo(destination)) {
+            // Windows test runner does not replace an existing destination.
+            // Readers tolerate this brief missing marker; they never see partial data.
+            if (destination.exists() && !destination.delete()) throw new IOException("Marker unavailable");
+            if (!temporary.renameTo(destination)) throw new IOException("Marker publication failed");
         }
     }
 

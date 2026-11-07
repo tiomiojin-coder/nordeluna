@@ -5,6 +5,10 @@ module NordelunaOnline
         defined?(System) && System.respond_to?(:is_android?) && System.is_android?
       end
 
+      def windows?
+        defined?(System) && System.respond_to?(:is_windows?) && System.is_windows?
+      end
+
       def start(url, data)
         busy = false
         begin
@@ -16,46 +20,68 @@ module NordelunaOnline
         body = JSON.dump(data.merge("protocol" => PROTOCOL))
         raise Error, "Equipe grande demais." if body.bytesize > 262144
         endpoint = NordelunaOnline.validate_url(url) + "/api"
-        @active = android? ? AndroidTicket.new(endpoint, body) : DesktopTicket.new(endpoint, body)
+        @active = if android?
+                    AndroidTicket.new(endpoint, body)
+                  elsif windows?
+                    WindowsTicket.new(endpoint, body)
+                  else
+                    DesktopTicket.new(endpoint, body)
+                  end
       end
     end
 
     class AndroidTicket
+      def mailbox_directory; File.join(Dir.pwd, ".nordeluna-online-bridge"); end
+
       def initialize(endpoint, body)
-        @directory = File.join(Dir.pwd, ".nordeluna-online-bridge")
-        @session = File.binread(File.join(@directory, "session"))
-        raise ConnectionLost, "Atualize o APK para usar o transporte online seguro." unless ready?
+        @directory = mailbox_directory
+        deadline = NordelunaOnline.now + 3
+        loop do
+          if File.file?(File.join(@directory, "session")) && ready?
+            @session = File.binread(File.join(@directory, "session"))
+            break unless @session.empty?
+          end
+          if NordelunaOnline.now >= deadline
+            message = File.file?(File.join(@directory, "session")) ?
+              "O transporte esta pausado ou iniciando. Volte ao jogo e tente novamente." :
+              "Transporte indisponivel. Reinicie o aplicativo e confira se o APK esta atualizado."
+            raise ConnectionLost, message
+          end
+          NordelunaOnline.frame
+        end
         @id = Random.bytes(16).unpack1("H*")
         temporary = path("writing")
         File.binwrite(temporary, @session + "\n" + endpoint + "\n" + body)
         File.rename(temporary, path("request"))
       rescue Errno::ENOENT, Errno::EACCES
-        raise ConnectionLost, "Transporte Android indisponivel. Atualize o APK e abra o jogo novamente."
+        raise ConnectionLost, "Transporte de rede indisponivel. Reinicie o jogo e confira a instalacao completa da atualizacao."
       end
 
       def path(extension); File.join(@directory, "#{@id}.#{extension}"); end
 
       def ready?
         status = File.join(@directory, "status")
-        File.file?(status) && File.binread(status) == "1" && Time.now.to_f - File.mtime(status).to_f < 4
+        # Wall-clock/mtime checks caused false failures after resume or clock changes.
+        File.file?(status) && File.binread(status) == "1"
       end
 
       def alive?
         return false if @cancelled || @result
         if File.file?(path("response"))
-          raise ConnectionLost, "Resposta Android grande demais." if File.size(path("response")) > MAX_RESPONSE + 1024
+          raise ConnectionLost, "Resposta de rede grande demais." if File.size(path("response")) > MAX_RESPONSE + 1024
           raw = File.binread(path("response"))
           File.delete(path("response"))
           status, body = raw.split("\n", 2)
           raise ConnectionLost, body.to_s if status == "ERROR"
-          raise ConnectionLost, "Resposta do transporte Android invalida." unless status.match?(/\A[1-5][0-9]{2}\z/)
+          raise ConnectionLost, "Resposta do transporte invalida." unless status.match?(/\A[1-5][0-9]{2}\z/)
           @result = { :status => status.to_i, :body => body.to_s.force_encoding("UTF-8") }
           return false
         end
-        raise ConnectionLost, "Conexao interrompida. O aplicativo foi pausado ou reiniciado." unless ready? && File.binread(File.join(@directory, "session")) == @session
+        state = File.file?(File.join(@directory, "status")) && File.binread(File.join(@directory, "status"))
+        raise ConnectionLost, "Conexao interrompida. O aplicativo foi pausado ou reiniciado." if state == "0" || File.binread(File.join(@directory, "session")) != @session
         true
       rescue Errno::ENOENT
-        raise ConnectionLost, "O transporte Android foi reiniciado. Abra outra sala."
+        raise ConnectionLost, "O transporte de rede foi reiniciado. Abra outra sala."
       end
 
       def value
@@ -92,6 +118,34 @@ module NordelunaOnline
       # Never kill a thread executing native HTTP code. Keep it registered until
       # completion so a new request cannot overlap a cancelled desktop request.
       def cancel; @cancelled = true; end
+    end
+
+    class WindowsTicket < AndroidTicket
+      def mailbox_directory; File.join(Dir.pwd, ".nordeluna-online-bridge-windows-#{Process.pid}"); end
+      def initialize(endpoint, body)
+        self.class.ensure_broker
+        super
+      end
+
+      def self.ensure_broker
+        if @pid
+          begin
+            return unless Process.waitpid(@pid, Process::WNOHANG)
+          rescue Errno::ECHILD
+          end
+          @pid = nil
+        end
+        helper = File.join(Dir.pwd, "Plugins", "Nordeluna Online", "bridge", "WindowsHttpBridge.exe")
+        raise ConnectionLost, "O transporte Windows esta ausente. Instale o patch completo do Online." unless File.file?(helper)
+        %w[session status].each do |name|
+          stale = File.join(Dir.pwd, ".nordeluna-online-bridge-windows-#{Process.pid}", name)
+          File.delete(stale) if File.file?(stale)
+        end
+        # A Windows GUI executable has no console. Pass an argument vector, never a shell command.
+        @pid = Process.spawn(helper, Dir.pwd, Process.pid.to_s, :out => File::NULL, :err => File::NULL)
+      rescue SystemCallError
+        raise ConnectionLost, "Nao foi possivel iniciar o transporte Windows. Confira o antivirus e o patch do jogo."
+      end
     end
   end
 

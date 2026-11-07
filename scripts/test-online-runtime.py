@@ -80,6 +80,11 @@ databox = cbui[cbui.index("class Battle::Scene::PokemonDataBox < Sprite"):cbui.i
 chunks.append(("actual CBUI data box", "class Sprite; end unless defined?(Sprite)\n" + databox))
 chunks.append(("local perspective and online UX", (Path(__file__).resolve().parent / "fixtures/online-experience.fixture").read_text(encoding="utf-8")))
 chunks.append(("nick, custom rules, doubles and map emotes", (Path(__file__).resolve().parent / "fixtures/online-social.fixture").read_text(encoding="utf-8")))
+target_source = (engine / "189_Scene_ChooseCommands.rb").read_text(encoding="utf-8")
+target_methods = [re.search(r"(?ms)^  def " + name + r"\(.*?(?=^  def )", target_source)[0]
+                  for name in ("pbChooseTarget", "pbFirstTarget", "pbCreateTargetTexts")]
+chunks.append(("actual target scene", "class Battle::Scene::RealOnlineTargetFixture < Battle::Scene\n" + "\n".join(target_methods) + "\nend"))
+chunks.append(("real target UI, six Noctgeist team and Mega", (Path(__file__).resolve().parent / "fixtures/online-polish.fixture").read_text(encoding="utf-8")))
 chunks.append(("Android transport and clipboard", (Path(__file__).resolve().parent / "fixtures/online-transport.fixture").read_text(encoding="utf-8")))
 state = ctypes.c_int()
 # ctypes embeds Ruby without a native Ruby main stack. Disable conservative GC

@@ -31,6 +31,8 @@ module NordelunaOnline
         @last_emote = -COOLDOWN
         @bubbles = {}
         @sequences = {}
+        @joining = false
+        @rejoin_pending = false
       end
 
       # A foreground request never races the map worker. Only transport runs in
@@ -67,6 +69,7 @@ module NordelunaOnline
         drain
         token = @token
         @token = nil
+        @joining = @rejoin_pending = false
         @queued = nil
         dispose_bubbles
         NordelunaOnline.request(@url, "action" => "map_leave", "token" => token) if token
@@ -76,7 +79,8 @@ module NordelunaOnline
       end
 
       def send_emote(id)
-        raise Error, "Entre no canal de mapa primeiro." unless active?
+        connect unless active?
+        raise Error, "Defina seu nick para entrar no canal de mapa." unless active?
         raise Error, "Emote invalido." unless EMOTES.key?(id)
         raise Error, "Espere 3 segundos entre emotes." if @queued || @sent_emote || NordelunaOnline.now - @last_emote < COOLDOWN
         @queued = id
@@ -91,7 +95,23 @@ module NordelunaOnline
         raw = result[:body] || result["body"]
         raise Error, "Resposta de mapa invalida." unless raw.is_a?(String) && raw.bytesize <= MAX_RESPONSE
         reply = JSON.parse(raw)
+        if reply.is_a?(Hash) && reply["ok"] == false && reply["error"].to_s.match?(/Canal de mapa expirou/i)
+          @token = nil
+          @queued = @sent_emote || @queued
+          @sent_emote = nil
+          @rejoin_pending = true
+          return
+        end
         raise Error, reply.is_a?(Hash) ? reply["error"].to_s : "Resposta de mapa invalida." unless reply.is_a?(Hash) && reply["ok"] == true
+        if @joining
+          @token = reply.fetch("token")
+          @id = reply.fetch("id")
+          @joining = false
+          @rejoin_pending = false
+          @next_poll = 0
+          @error = nil
+          return
+        end
         peers = reply["peers"]
         raise Error, "Lista de jogadores invalida." unless peers.is_a?(Array) && peers.length <= 40
         # Ignore an old-map response after a transition.
@@ -121,13 +141,26 @@ module NordelunaOnline
         sprite = Sprite.new
         sprite.bitmap = Bitmap.new(260, 54)
         sprite.bitmap.fill_rect(0, 0, 260, 54, Color.new(15, 29, 51, 225))
+        draw_icon(sprite.bitmap, emote)
         sprite.bitmap.font.size = 17
         sprite.bitmap.font.color = Color.new(240, 248, 255)
-        sprite.bitmap.draw_text(6, 1, 248, 24, NordelunaOnline.safe_label(name), 1)
+        sprite.bitmap.draw_text(40, 1, 214, 24, NordelunaOnline.safe_label(name), 1)
         sprite.bitmap.font.color = Color.new(100, 220, 245)
-        sprite.bitmap.draw_text(6, 25, 248, 24, _INTL(EMOTES.fetch(emote)), 1)
+        sprite.bitmap.draw_text(40, 25, 214, 24, _INTL(EMOTES.fetch(emote)), 1)
         sprite.z = 90000
         @bubbles[id] = { :sprite => sprite, :x => x, :y => y, :map => $game_map.map_id, :until => NordelunaOnline.now + 4 }
+      end
+
+      def draw_icon(bitmap, id)
+        rows = case id
+        when "wave" then %w[00101010 00101010 00101010 00111110 10111110 11111110 01111100 00111000]
+        when "celebrate" then %w[00011000 00011000 01111110 00111100 00111100 01111110 01000010 10000001]
+        else %w[10000001 11000011 01100110 00111100 00011000 00111100 01100110 01000010]
+        end
+        color = Color.new(110, 225, 250)
+        rows.each_with_index do |row, y|
+          row.chars.each_with_index { |pixel, x| bitmap.fill_rect(9 + x * 3, 15 + y * 3, 3, 3, color) if pixel == "1" }
+        end
       end
 
       def dispose_bubble(bubble)
@@ -152,6 +185,7 @@ module NordelunaOnline
           # RPG Maker map display offsets use 1/128 tile units.
           sprite.x = ((bubble[:x] + 0.5) * 32 - $game_map.display_x / 4.0 - 130).round
           sprite.y = (bubble[:y] * 32 - $game_map.display_y / 4.0 - 66).round
+          sprite.y += (Math.sin(NordelunaOnline.now * 5) * 2).round
           sprite.visible = visible && sprite.x > -260 && sprite.x < Graphics.width && sprite.y > -54 && sprite.y < Graphics.height
           sprite.x = [[sprite.x, 0].max, [Graphics.width - 260, 0].max].min
           sprite.y = [[sprite.y, 0].max, [Graphics.height - 54, 0].max].min
@@ -167,6 +201,12 @@ module NordelunaOnline
           return unless $game_map
           safe = safe_map?
           update_bubbles(safe)
+          if @rejoin_pending && safe && !@worker
+            @joining = true
+            @worker_deadline = NordelunaOnline.now + REQUEST_TIMEOUT
+            @worker = Transport.start(@url, { "action" => "map_join", "profile" => NordelunaOnline.profile, "build" => NordelunaOnline.build })
+            return
+          end
           return unless active? && safe && !@worker && NordelunaOnline.now >= (@next_poll || 0)
           @sent_position = position
           @sent_emote = @queued
@@ -180,6 +220,7 @@ module NordelunaOnline
           @worker = nil
           @error = error.message
           @token = nil
+          @joining = @rejoin_pending = false
           @queued = @sent_emote = nil
           dispose_bubbles
         ensure
@@ -215,7 +256,7 @@ module NordelunaOnline
       when 0 then MapChannel.connect
       when 1, 2, 3
         MapChannel.send_emote(%w[wave celebrate battle][choice - 1])
-        return
+        return :sent
       when 4 then MapChannel.disconnect
       else return
       end
@@ -230,12 +271,6 @@ MenuHandlers.add(:pause_menu, :nordeluna_map_emotes, {
   "name" => _INTL("Emotes online"), "order" => 46,
   "condition" => proc { !$game_temp.in_battle },
   "effect" => proc { |menu|
-    menu.pbHideMenu
-    begin
-      NordelunaOnline.map_emotes_menu
-    ensure
-      menu.pbShowMenu
-    end
-    next false
+    next NordelunaOnline.run_pause_action(menu) { NordelunaOnline.map_emotes_menu }
   }
 })

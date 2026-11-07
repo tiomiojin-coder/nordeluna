@@ -237,10 +237,15 @@ module NordelunaOnline
         end
         target = action["target"]
         raise Error, "Alvo invalido." unless target.is_a?(Integer) && target.between?(-1, 3)
+        move = @choices[idx][2]
+        target_data = move.pbTarget(@battlers[idx])
+        # The actual scene returns the user's cursor for automatic/spread targets.
+        # This is a UI placeholder, not a chosen target. Let the engine resolve it.
+        automatic = target_data.num_targets != 1 || target_data.id == :RandomNearFoe
+        target = -1 if automatic
         if target >= 0
-          move = @choices[idx][2]
-          raise Error, "Alvo indisponivel." unless @battlers[target] && !@battlers[target].fainted? && pbMoveCanTarget?(idx, target, move.pbTarget(@battlers[idx]))
-        elsif @choices[idx][2].pbTarget(@battlers[idx]).num_targets == 1 && n != -1
+          raise Error, "Alvo indisponivel." unless @battlers[target] && !@battlers[target].fainted? && pbMoveCanTarget?(idx, target, target_data)
+        elsif !automatic && n != -1
           # The engine's auto-choice (e.g. Encore) can use its default target.
           raise Error, "Escolha um alvo para o golpe." if pbCanShowFightMenu?(idx)
         end

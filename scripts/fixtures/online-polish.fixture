@@ -1,0 +1,121 @@
+$game_map = nil
+$game_temp = Struct.new(:in_battle,:party_direct_damage_taken,:party_critical_hits_dealt,:in_menu,:message_window_showing,:in_storage).new(true,nil,nil,false,false,false)
+class RealTargetWindow
+  attr_accessor :index
+  def setDetails(texts, mode); @texts = texts; @mode = mode; end
+end
+class Battle::Scene::RealOnlineTargetFixture
+  attr_accessor :mega_choice
+  def initialize; @sprites = { 'targetWindow'=>RealTargetWindow.new }; @mega_choice = 0; end
+  def pbStartBattle(battle); @battle = battle; end
+  def pbShowWindow(*args); end
+  def pbSelectBattler(*args); end
+  def pbUpdate(*args); end
+  def pbShowCommands(*args); @mega_choice; end
+  def pbPlayDecisionSE; end
+  def pbPlayCancelSE; end
+  def pbPlayCursorSE; end
+end
+Battle::Scene.const_set(:TARGET_BOX, 3) unless Battle::Scene.const_defined?(:TARGET_BOX)
+module Input
+  class << self
+    alias trigger_before_real_target trigger?
+    def trigger?(key); key == Input::USE; end
+  end
+end
+codec = NordelunaOnline::PokemonCodec
+trainer_type = GameData::TrainerType.keys.first
+rules = {'level'=>50,'count'=>2,'format'=>'double','legendaries'=>false}
+[:REFLECT, :SURF, :ROOST, :UPROAR, :TACKLE].each do |move|
+  parties = [[:CATITUX, :AIPOM], [:NOCTGEIST, :PIKACHU]].map do |ids|
+    ids.map { |id| Pokemon.new(id, 50, nil, false, false).tap { |p| p.moves = [Pokemon::Move.new(move)]; p.heal } }
+  end
+  raw_scene = Battle::Scene::RealOnlineTargetFixture.new
+  trainers = [NPCTrainer.new('Host', trainer_type), NPCTrainer.new('Guest', trainer_type)]
+  battle = NordelunaOnline::LinkBattle.new(raw_scene, parties, trainers, DoubleTestLink.new(1, MemoryHub.new, rules), 19723)
+  battle.pbSetUpSides
+  battle.scene.pbStartBattle(battle)
+  data = battle.battlers[1].moves[0].pbTarget(battle.battlers[1])
+  target = battle.scene.pbChooseTarget(1, data)
+  # These cursor positions come from Essentials' actual target menu, not a mock selector.
+  battle.online_apply_action(1, {'kind'=>'move','index'=>0,'target'=>target,'mega'=>false})
+  automatic = data.num_targets != 1 || data.id == :RandomNearFoe
+  check(battle.choices[1][3] == (automatic ? -1 : target), "real #{move} cursor was not normalized")
+  if move == :TACKLE
+    rejects('illegal own-side target accepted') { battle.online_apply_action(1, {'kind'=>'move','index'=>0,'target'=>1,'mega'=>false}) }
+  end
+end
+module Input
+  class << self; alias trigger? trigger_before_real_target; end
+end
+
+# Real six-Pokemon packets, including Noctgeist, and a complete paired battle.
+six_ids = [[:NOCTGEIST, :CATITUX, :AIPOM, :PIKACHU, :EEVEE, :SQUIRTLE],
+           [:CHARIZARD, :BULBASAUR, :EEVEE, :AIPOM, :NOCTGEIST, :CATITUX]]
+six_campaign = six_ids.map { |ids| ids.map { |id| Pokemon.new(id, 50, nil, false, false).tap { |p| p.moves = [Pokemon::Move.new(:TACKLE)]; p.heal } } }
+six_players = six_campaign.map { |party| {'payload'=>party.map { |p| codec.encode(p) }} }
+original = Marshal.dump(six_campaign)
+six_rules = rules.merge('count'=>6)
+six_teams = NordelunaOnline.prepare_online_parties(six_players, six_rules)
+check(six_teams.map(&:length) == [6,6] && six_teams[0][0].species == :NOCTGEIST, 'six-party dropped Fakemon')
+$player.party = six_campaign[0]
+packets = NordelunaOnline.select_online_team(six_rules)
+check(packets.length == 6 && codec.decode(packets[0]).species == :NOCTGEIST, 'six-party preflight rejected Noctgeist')
+hub = MemoryHub.new
+runs = 2.times.map do |side|
+  trainers = [NPCTrainer.new('Host', trainer_type), NPCTrainer.new('Guest', trainer_type)]
+  NordelunaOnline::LinkBattle.new(DoubleTestScene.new,
+    NordelunaOnline.prepare_online_parties(six_players, six_rules), trainers, DoubleTestLink.new(side, hub, six_rules), 74563)
+end
+decisions = runs.map { |b| Thread.new { b.pbStartBattle } }.map(&:value)
+check(decisions[0] == decisions[1] && runs[0].online_state == runs[1].online_state, 'six-Noctgeist battle diverged')
+check(runs.all? { |b| b.pbParty(0).length == 6 && b.pbParty(1).length == 6 }, 'six-team was truncated')
+check(Marshal.dump(six_campaign) == original, 'six-party campaign changed')
+
+# The explicit Mega prompt must retain the scene toggle and the one-per-side rule.
+parties = 2.times.map do
+  [[:CHARIZARD,:CHARIZARDITEX],[:BLASTOISE,:BLASTOISINITE]].map do |species, stone|
+    Pokemon.new(species,50,nil,false,false).tap { |p| p.item = stone; p.moves=[Pokemon::Move.new(:TACKLE)]; p.heal }
+  end
+end
+scene = Battle::Scene::RealOnlineTargetFixture.new
+trainers = [NPCTrainer.new('Host',trainer_type),NPCTrainer.new('Guest',trainer_type)]
+battle = NordelunaOnline::LinkBattle.new(scene,parties,trainers,DoubleTestLink.new(0,MemoryHub.new,rules),5)
+battle.pbSetUpSides
+battle.online_mega_prompt(0)
+check(battle.pbRegisteredMegaEvolution?(0) && battle.pbCanMegaEvolve?(0), 'registered Mega vanished from fight UI')
+check(!battle.pbCanMegaEvolve?(2) && battle.pbCanMegaEvolve?(1), 'Mega affected other trainer or allowed second selection')
+
+# Sending from either menu must close it, allowing Scene_Map to dispatch the emote.
+class EmotePauseFixture
+  attr_reader :events
+  def initialize; @events=[]; end
+  def pbHideMenu; @events << :hide; end
+  def pbShowMenu; @events << :show; end
+  def pbEndScene; @events << :end; end
+end
+$game_temp = Struct.new(:in_battle,:in_menu,:message_window_showing).new(false,true,false)
+menu = EmotePauseFixture.new
+check(NordelunaOnline.run_pause_action(menu) { :sent }, 'emote menu did not signal close')
+check(menu.events == [:hide,:end] && !$game_temp.in_menu, 'emote remained blocked behind pause menu')
+menu = EmotePauseFixture.new
+check(!NordelunaOnline.run_pause_action(menu) { nil } && menu.events == [:hide,:show], 'cancelled menu was destroyed')
+
+class EmoteReplyFixture
+  def initialize(reply); @reply=reply; end
+  def alive?; false; end
+  def value; {body: NordelunaOnline::JSON.dump(@reply)}; end
+  def cancel; end
+end
+channel = NordelunaOnline::MapChannel
+channel.instance_variable_set(:@worker,EmoteReplyFixture.new({'ok'=>false,'error'=>'Canal de mapa expirou. Entre novamente.'}))
+channel.instance_variable_set(:@sent_emote,'celebrate')
+channel.collect
+check(channel.instance_variable_get(:@rejoin_pending) && channel.instance_variable_get(:@queued) == 'celebrate', 'expired channel lost emote instead of reconnecting')
+channel.instance_variable_set(:@joining,true)
+channel.instance_variable_set(:@worker,EmoteReplyFixture.new({'ok'=>true,'token'=>'new-token','id'=>'new-id','cooldown'=>3}))
+channel.collect
+check(channel.active? && !channel.instance_variable_get(:@rejoin_pending) && channel.instance_variable_get(:@queued) == 'celebrate', 'rejoin discarded queued emote')
+channel.instance_variable_set(:@token,nil)
+channel.instance_variable_set(:@queued,nil)
+'OK: real target scene accepts field/spread/self/random attacks; six Noctgeist team and synchronized combat; explicit Mega prompt and emote menu exit passed.'

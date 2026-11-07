@@ -16,7 +16,7 @@ module BridgeFixtureFiles
   end
   def file?(path); bridge_path?(path) ? $bridge_files.key?(File.expand_path(path)) : super; end
   def size(path); bridge_path?(path) ? binread(path).bytesize : super; end
-  def mtime(path); bridge_path?(path) ? Time.now : super; end
+  def mtime(path); bridge_path?(path) ? Time.at(0) : super; end
   def rename(a, b); return super unless bridge_path?(a); $bridge_files[File.expand_path(b)] = $bridge_files.delete(File.expand_path(a)); 0; end
   def delete(path); return super unless bridge_path?(path); $bridge_files.delete(File.expand_path(path)); 1; end
 end
@@ -32,7 +32,11 @@ module NordelunaOnline
   class << self
     alias frame_before_bridge_test frame
     def frame
-      directory = File.join(Dir.pwd, '.nordeluna-online-bridge')
+      directory = Transport.android? ? File.join(Dir.pwd, '.nordeluna-online-bridge') : File.join(Dir.pwd, ".nordeluna-online-bridge-windows-#{Process.pid}")
+      if $bridge_resume_test
+        File.binwrite(File.join(directory, 'status'), '1')
+        $bridge_resume_test = false
+      end
       Dir.glob(File.join(directory, '*.request')).each do |file|
         session, endpoint, body = File.binread(file).split("\n", 3)
         check(session == 'test-session', 'request session changed')
@@ -54,6 +58,8 @@ begin
   File.binwrite('.nordeluna-online-bridge/session', 'test-session')
   File.binwrite('.nordeluna-online-bridge/status', '1')
   threads_before = Thread.list.length
+  File.binwrite('.nordeluna-online-bridge/status', '')
+  $bridge_resume_test = true
   answer = NordelunaOnline.request('https://example.org', {'action'=>'health'})
   check(answer['nick'] == 'Lúna', 'Android bridge corrupted UTF-8')
   check(Thread.list.length == threads_before, 'Android transport created Ruby worker threads')
@@ -68,6 +74,61 @@ ensure
   module NordelunaOnline
     class << self; alias frame frame_before_bridge_test; end
   end
+end
+
+# Windows must use the child-process mailbox too, never the native HTTP binding.
+module System
+  def self.is_android?; false; end
+  def self.is_windows?; true; end
+end
+module BridgeFixtureHelper
+  def file?(path)
+    return true if path.to_s.end_with?('/bridge/WindowsHttpBridge.exe')
+    super
+  end
+end
+File.singleton_class.prepend(BridgeFixtureHelper)
+module Process
+  class << self
+    alias spawn_before_bridge_fixture spawn
+    def spawn(*args)
+      $bridge_spawn_arguments = args
+      directory = File.join(Dir.pwd, ".nordeluna-online-bridge-windows-#{pid}")
+      File.binwrite(File.join(directory,'session'),'test-session')
+      File.binwrite(File.join(directory,'status'),'1')
+      1234
+    end
+  end
+end
+$bridge_pause_test = false
+module NordelunaOnline
+  class << self; alias frame_after_android_test frame; end
+end
+# Temporarily reuse the tested mailbox-frame handler for the Windows directory.
+module NordelunaOnline
+  class << self; alias frame frame_before_bridge_test; end
+end
+# The Android fixture restored #frame; this small pump represents the broker ACK.
+module NordelunaOnline
+  class << self
+    def frame
+      directory = File.join(Dir.pwd, ".nordeluna-online-bridge-windows-#{Process.pid}")
+      Dir.glob(File.join(directory,'*.request')).each do |file|
+        File.binwrite(file.sub(/\.request\z/,'.response'), "200\n{\"ok\":true}")
+        File.delete(file)
+      end
+      frame_before_bridge_test
+    end
+  end
+end
+check(NordelunaOnline.request('https://example.org',{'action'=>'health'})['ok'], 'Windows bypassed mailbox')
+check($bridge_spawn_arguments[0].end_with?('WindowsHttpBridge.exe') && $bridge_spawn_arguments[1] == Dir.pwd && $bridge_spawn_arguments[2] == Process.pid.to_s,
+      'Windows helper launch used a shell or wrong parent')
+module Process
+  class << self; alias spawn spawn_before_bridge_fixture; end
+end
+module NordelunaOnline
+  class << self; alias frame frame_before_bridge_test; end
 end
 
 # Copy exactly the public code, never the session token or an invitation URL.
@@ -89,4 +150,4 @@ rescue NordelunaOnline::Cancelled
 end
 rejects('clipboard accepted arbitrary content') { NordelunaOnline.show_room_code('token:secret') }
 alias pbMessage pbMessage_before_clipboard_test
-'OK: Android uses mailbox transport without native HTTP/Ruby worker threads; pause aborts safely; room code copies exactly and cancellation remains available.'
+'OK: Android resumes without mtime/partial-marker false failures; Windows uses hidden mailbox helper; native HTTP bypassed on both; real target UI, six Noctgeist party, Mega and emote menu regressions passed.'

@@ -1,5 +1,5 @@
 diff --git a/android/app/build.gradle b/android/app/build.gradle
-index 036a159..12dc641 100644
+index 036a159..c52b65c 100644
 --- a/android/app/build.gradle
 +++ b/android/app/build.gradle
 @@ -7,12 +7,12 @@ android {
@@ -14,7 +14,7 @@ index 036a159..12dc641 100644
 -        versionName "0.1.0"
 -        archivesBaseName = "mkxp-z-$versionName"
 +        versionCode 18
-+        versionName "1.11.0"
++        versionName "1.12.0"
 +        archivesBaseName = "Nordeluna-Android-$versionName"
          // Native ABIs are produced by build.sh (see ../build.sh) and placed
          // under src/main/jniLibs/. Everything present there is packaged.
@@ -3232,7 +3232,7 @@ index 7c821a4..c5f9920 100644
      public static void captureClose() {
          if (mAudioRecord != null) {
 diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
-index 9e37fed..f1d73ea 100644
+index 9e37fed..5b43a43 100644
 --- a/android/app/src/main/res/values/strings.xml
 +++ b/android/app/src/main/res/values/strings.xml
 @@ -1,11 +1,65 @@
@@ -3303,6 +3303,6 @@ index 9e37fed..f1d73ea 100644
 +    <string name="mix_external_audio">Permitir música de outros aplicativos</string>
 +    <string name="mix_external_audio_hint">Ativado por padrão: Spotify, YouTube Music e outros podem tocar junto com o jogo.</string>
 +    <string name="whats_new_title">Novidades da versão %1$s</string>
-+    <string name="whats_new_message">• Online Android com transporte de rede separado da VM do jogo para evitar o caminho nativo inseguro.\n\n• Limites de tempo e resposta; interrupção segura ao pausar e reconexão sem reaproveitar pedidos antigos.\n\n• Copiar código da sala para colar no WhatsApp ou compartilhar com outro jogador.\n\n• Diagnóstico de transporte incluído no relatório de erro, sem códigos privados ou dados dos Pokémon.\n\n• Mantidos nick, salas personalizadas, duplas, emotes e recuperação de trocas. Atualize os dois jogos para esta versão.</string>
++    <string name="whats_new_message">• Duplas: corrigida a seleção de alvos de golpes em área, de suporte e de alvo automático.\n\n• Equipes de seis com Fakemon: confirmação da equipe inteira e diagnóstico por Pokémon antes de conectar.\n\n• Mega Evolução: escolha explícita antes do golpe, mantendo uma Mega por jogador e as condições da forma.\n\n• Emotes: envio fecha o menu, reconexão do canal e ícones visuais. Os dois jogadores devem entrar no canal do mesmo mapa.\n\n• Android: corrigido aviso incorreto de transporte indisponível ao retomar.\n\n• Windows: transporte fora da VM do jogo, sem janela de console. Atualize os dois clientes para esta versão.</string>
 +    <string name="got_it">Entendi</string>
  </resources>
