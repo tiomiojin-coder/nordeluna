@@ -1,0 +1,113 @@
+$assertions = 0
+def check(value, message)
+  raise message unless value
+  $assertions += 1
+end
+
+# All three actual theme image sizes, both sides, and reusing a visible bar
+# after an ability changes without assigning a new battler.
+[0,1,2].each do |theme|
+  [0,1].each do |side|
+    $PokemonSystem.battle_ui=theme
+    bar=Battle::Scene::AbilitySplashBar.new(side)
+    battler=Struct.new(:name,:abilityName).new("Aipom","Pickup")
+    bar.battler=battler
+    bar.visible=true
+    check(bar.bitmap.draws.any? { |d| d[:text]=="Pickup" }, "Ability absent: theme #{theme}, side #{side}")
+    check(bar.bitmap.draws.all? { |d| d[:y]>=0 && d[:y]+d[:h]<=bar.bitmap.height && d[:x]+d[:w]<=bar.bitmap.width }, "Clipped ability bar")
+    check(bar.bitmap.draws.all? { |d| d[:align]==(side==0 ? 0 : 2) }, "Incorrect side alignment")
+    check(bar.bitmap.font.size==22, "Font settings leaked after refresh")
+    battler.abilityName="Frisk"
+    bar.update
+    check(bar.bitmap.draws.any? { |d| d[:text]=="Frisk" } && bar.bitmap.draws.none? { |d| d[:text]=="Pickup" }, "Ability change left stale label")
+    battler.name="Nome de Pokemon muito longo"
+    battler.abilityName="Habilidade com um nome extraordinariamente longo"
+    bar.update
+    check(bar.bitmap.draws.all? { |d| bar.bitmap.text_size(d[:text]).width * d[:size] / bar.bitmap.font.size <= d[:w]+1 }, "Long label overflows")
+    battler.abilityName=""
+    bar.update
+    check(bar.bitmap.draws.any? { |d| d[:text].start_with?("Sem habil") }, "Missing ability fallback")
+    bar.battler=nil
+    check(bar.bitmap.draws.empty?, "Previous battler remains visible")
+    bar.dispose
+    bar.update
+  end
+end
+
+bitmap=Bitmap.new(120,80)
+NordelunaUI.surface(bitmap,0,0,120,80,true)
+NordelunaUI.surface(bitmap,20,20,30,30,false)
+check(NordelunaUI.light_at(bitmap,25,25)==false, "Topmost contrast lost")
+check(NordelunaUI.light_at(bitmap,5,5)==true, "Background contrast lost")
+bitmap.clear
+check(NordelunaUI.light_at(bitmap,25,25).nil?, "Contrast metadata survived clear")
+100.times do |i|
+  NordelunaUI.surface(bitmap,i%30,0,5,5,false)
+  NordelunaUI.surface(bitmap,0,0,120,80,true)
+end
+check(bitmap.instance_variable_get(:@journal_regions).length==1, "Covered surface history retained")
+NordelunaUI.surface(bitmap,-4,-3,8,8,false)
+check(bitmap.instance_variable_get(:@journal_regions).key?([0,0,4,5]), "Surface not clipped to bitmap")
+NordelunaUI.surface(bitmap,500,500,10,10,true)
+check(NordelunaUI.light_at(bitmap,505,505).nil?, "Offscreen surface registered")
+
+[:python,:journal,:book].each do |theme|
+  prefix="Plugins/00 RE Visual Core/assets/#{theme}/"
+  name=ASSET_DIMS.keys.find { |p| p.start_with?(prefix) && p.end_with?(".png") && !p.end_with?("background.png") }.split("/").last.sub(/\.png$/, "")
+  # Call each layer directly as well as the active aged-book wrapper.
+  method={python: :journal_original_image,journal: :aged_book_image,book: :image}[theme]
+  first=REPixelUI.send(method,name)
+  check(REPixelUI.send(method,name).equal?(first), "Live #{theme} image needlessly recreated")
+  first.dispose
+  fresh=REPixelUI.send(method,name)
+  check(!fresh.disposed? && !fresh.equal?(first), "Disposed #{theme} cache returned")
+end
+background=REPixelUI.image("background")
+background.dispose
+check(!REPixelUI.image("background").disposed?, "Disposed book background returned")
+
+labels=["", "Aipom", "Habilidade muito comprida", "A"*120, "a\u00e7\u00e3o"]
+[0,1,3,12,24,64,120].each do |width|
+  [16,24].each do |size|
+    labels.each do |label|
+      check(REPixelUI.width(REPixelUI.fit(label,width,size),size)<=width, "Fitted text exceeds panel")
+      check(REPixelUI.wrap(label,width,size).all? { |line| REPixelUI.width(line,size)<=width }, "Wrapped text exceeds panel")
+    end
+  end
+end
+word="abcdefghijklmnopqrstuvwxyz"*3
+check(REPixelUI.wrap(word,24).join==word, "Long-word wrapping dropped fitting glyphs")
+progress=[]
+NordelunaUI.animate(0) { |t| progress << t }
+check(progress==[1.0], "Zero-duration animation did not finish")
+NordelunaUI.animate(0.05) { |t| progress << t }
+check(progress.last==1.0 && progress.length<10, "Animation uses wrong time scale")
+check(NordelunaVoice.clock==$clock, "Voice clock not in monotonic seconds")
+
+map=Struct.new(:display_x,:display_y).new(0,0)
+mud=NordelunaMudTerrain::FootstepSprite.new(map,2,3,1)
+check(!mud.disposed?, "Mud effect expired immediately")
+$clock+=0.2; mud.update
+check(!mud.disposed? && mud.opacity.between?(1,179), "Mud fade broken")
+$clock+=1; mud.update
+check(mud.disposed? && mud.bitmap.disposed?, "Mud effect resources not released")
+mud.dispose
+event=Struct.new(:screen_x,:screen_y).new(100,100)
+emotion=OverworldPokemonEmotionSprite.new(event,:FEAR)
+check(!emotion.disposed?, "Emotion expired immediately")
+$clock+=1; emotion.update
+check(emotion.disposed? && emotion.bitmap.disposed?, "Emotion resources not released")
+emotion.dispose
+
+NordelunaAtmosphere.const_set(:ASSET_ROOT,"Plugins/Nordeluna Atmosphere/assets")
+renderer=NordelunaAtmosphere::Renderer.allocate
+renderer.instance_variable_set(:@assets,{})
+asset=renderer.asset(:fog); asset.dispose
+check(!renderer.asset(:fog).disposed?, "Disposed atmosphere asset returned")
+renderer.instance_variable_set(:@last_time,$clock-0.05)
+renderer.instance_variable_set(:@viewport,Struct.new(:visible).new(true))
+$scene=Object.new
+renderer.update
+check(renderer.instance_variable_get(:@last_time)==$clock, "Atmosphere clock not in seconds")
+check(renderer.instance_variable_get(:@viewport).visible==false, "Atmosphere visible outside map")
+"regression checks passed"

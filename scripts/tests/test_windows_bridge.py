@@ -44,7 +44,7 @@ class WindowsBridgeTests(unittest.TestCase):
             thread.start()
             parent = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(90)"], creationflags=subprocess.CREATE_NO_WINDOW)
             helper = subprocess.Popen([str(exe), str(directory), str(parent.pid)], creationflags=subprocess.CREATE_NO_WINDOW)
-            mailbox = directory / (".nordeluna-online-bridge-windows-" + str(parent.pid))
+            mailbox = directory / (".nordeluna-online-bridge-windows-v2-" + str(parent.pid))
             def wait_file(path):
                 deadline = time.monotonic() + 8
                 while not path.is_file():
@@ -54,6 +54,8 @@ class WindowsBridgeTests(unittest.TestCase):
                 return path.read_text(encoding="utf-8")
             try:
                 session = wait_file(mailbox / "session")
+                self.assertEqual(wait_file(mailbox / "status"), "1")
+                status_stamp = (mailbox / "status").stat().st_mtime_ns
                 url = f"http://127.0.0.1:{server.server_port}/api"
                 def request(number, ticket_session=session, cancel=False):
                     name = format(number, "032x")
@@ -69,6 +71,8 @@ class WindowsBridgeTests(unittest.TestCase):
                     result = request(number)
                     self.assertTrue(result.startswith("200\n"), result + "\n" + (directory / "nordeluna-online-transport.log").read_text())
                 self.assertEqual(len(received), 15)
+                self.assertEqual((mailbox / "status").stat().st_mtime_ns, status_stamp,
+                                 "broker rewrote its status while Ruby may be reading it")
                 self.assertTrue(all(len(row["payload"]) == 6 and row["profile"]["name"] == "Lúna" for row in received))
                 self.assertTrue(request(20, ticket_session="old").startswith("ERROR\n"))
                 self.assertTrue(request(21, cancel=True).startswith("ERROR\n"))

@@ -1,0 +1,102 @@
+$area_files={};$area_fault=nil;$area_calls=[];$area_confirm=[];$area_messages=[];$area_accounts={};$area_time=200.0
+module AreaFileIO
+  def file?(path); path.to_s.start_with?('area-save') ? $area_files.key?(path) : super; end
+  def binread(path); path.to_s.start_with?('area-save') ? $area_files.fetch(path) : super; end
+  def binwrite(path,body)
+    return super unless path.to_s.start_with?('area-save')
+    if $area_fault==:write && path.end_with?('.online-tmp')
+      $area_files[path]='partial';raise IOError,'simulated disk full'
+    end
+    $area_files[path]=body
+  end
+  def rename(from,to)
+    return super unless from.to_s.start_with?('area-save')
+    $area_files[to]=$area_files.delete(from)
+  end
+  def delete(path); path.to_s.start_with?('area-save') ? $area_files.delete(path) : super; end
+end
+File.singleton_class.prepend(AreaFileIO)
+module SaveData
+  FILE_PATH='area-save.rxdata'
+  def self.save_to_file(path)
+    File.binwrite(path,Marshal.dump({global_metadata:$PokemonGlobal,
+      position:[$game_map.map_id,$game_player.x,$game_player.y,$game_player.direction]}))
+  end
+end
+module Game
+  def self.save(*args,**kwargs)
+    SaveData.save_to_file(SaveData::FILE_PATH);true
+  rescue IOError,SystemCallError
+    false
+  end
+  def self.load_map; $area_map_seen_on_load=$game_map.map_id; end
+  def self.start_new; $area_started_new=true; end
+end
+AreaRect=Struct.new(:x,:y,:width,:height) do
+  def set(*values);self.x,self.y,self.width,self.height=values;end
+end
+class Sprite
+  attr_accessor :ox,:oy,:opacity,:src_rect
+  def initialize(*args);@src_rect=AreaRect.new(0,0,0,0);@opacity=255;@visible=true;@disposed=false;end
+end
+class AnimatedBitmap
+  attr_reader :bitmap
+  def initialize(*args);@bitmap=Bitmap.new(128,128);end
+  def width;128;end
+  def height;128;end
+  def update;end
+  def dispose;@bitmap.dispose unless @bitmap.disposed?;end
+end
+class AreaPlayer
+  attr_accessor :x,:y,:direction,:character_name,:pattern,:through
+  def initialize;@x=15;@y=22;@direction=8;@character_name='trainer_RED';@pattern=0;@through=false;end
+  def moveto(x,y);@x,@y=x,y;end
+  def moving?;false;end
+  def screen_x;@x*32+16;end
+  def screen_y;(@y+1)*32;end
+  def sprite_size;[32,32];end
+  def turn_down;@direction=2;end
+  def turn_left;@direction=4;end
+  def turn_right;@direction=6;end
+  def turn_up;@direction=8;end
+end
+class AreaMap < Game_Map
+  attr_accessor :map_id,:display_x,:display_y
+  def initialize(id);@map_id=id;@display_x=@display_y=0;end
+end
+class AreaFactory
+  attr_reader :map
+  def setup(id);@map=AreaMap.new(id);end
+end
+class Scene_Map
+  def transfer_player(*args)
+    $map_factory.setup($game_temp.player_new_map_id);$game_map=$map_factory.map
+    $game_player.moveto($game_temp.player_new_x,$game_temp.player_new_y)
+    $game_player.direction=$game_temp.player_new_direction
+    $game_temp.player_transferring=false
+    if $area_fault==:drop_after_transfer
+      $area_fault=nil
+      NordelunaOnline::MapChannel.instance_variable_set(:@token,nil)
+      NordelunaOnline::Areas.connection_lost
+    end
+  end
+end
+AreaTemp=Struct.new(:in_battle,:in_menu,:message_window_showing,:player_transferring,
+  :player_new_map_id,:player_new_x,:player_new_y,:player_new_direction)
+def pbResolveBitmap(path);path;end
+def pbSetSystemFont(bitmap);end
+def pbFadeOutIn;yield;end
+def pbConfirmMessage(*args);$area_confirm.shift || false;end
+def pbMessage(text,*args);$area_messages<<text;0;end
+def load_data(path);Struct.new(:width,:height).new(64,64);end
+module Graphics
+  def self.frame_reset;end
+  def self.update;$area_time+=0.01;end
+end
+$game_temp=AreaTemp.new(false,false,false,false)
+$game_player=AreaPlayer.new
+$map_factory=AreaFactory.new;$map_factory.setup(42);$game_map=$map_factory.map
+$scene=Scene_Map.new
+$PokemonGlobal.nordeluna_online_pending=nil
+$PokemonGlobal.nordeluna_online_nickname='Lunar'
+'area/save display doubles ready'

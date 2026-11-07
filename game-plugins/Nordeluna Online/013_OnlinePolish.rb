@@ -1,9 +1,12 @@
 module NordelunaOnline
   def self.run_pause_action(menu)
     ended = false
+    previous_map = $game_map&.map_id
+    ChatPanel.hide if defined?(ChatPanel)
     menu.pbHideMenu
     begin
-      if yield == :sent
+      result = yield
+      if result == :sent || previous_map != $game_map&.map_id
         menu.pbEndScene
         $game_temp.in_menu = false
         ended = true

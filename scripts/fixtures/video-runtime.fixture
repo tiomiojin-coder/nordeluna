@@ -1,0 +1,57 @@
+$android=true; $clock=100.0; $windows_calls=0; $messages=[]; $media_reply="OK\ncompleted"
+$files={"Movies/001.mp4"=>"video", "Movies/002.mp4"=>"video"}
+$bridge="/game/.nordeluna-movie-bridge"
+$files[$bridge+"/session"]="12345678-1234-1234-1234-123456789abc"
+$files[$bridge+"/status"]="1\n1"
+module Process; def self.clock_gettime(kind); $clock; end; end
+module System; def self.is_android?; $android; end; end
+class << Dir; def pwd; "/game"; end; end
+class << File
+  def file?(path); $files.key?(path); end
+  def size(path); $files.fetch(path).bytesize; end
+  def binread(path); $files.fetch(path) {raise Errno::ENOENT}; end
+  def binwrite(path,body); $files[path]=body; end
+  def rename(from,to); $files[to]=$files.delete(from); end
+  def delete(path); $files.delete(path); end
+end
+module Graphics
+  class << self; attr_accessor :brightness; end
+  self.brightness=210
+  def self.update
+    $clock+=0.05
+    $files.keys.grep(/\.request$/).each do |key|
+      $last_packet=$files[key]
+      next unless $media_reply
+      $files[key.sub(/\.request$/, ".response")]=$media_reply
+      $files.delete(key)
+    end
+  end
+  def self.frame_reset; end
+end
+module Input; def self.update; end; end
+module Audio
+  def self.bgm_stop; end
+  def self.me_stop; end
+  def self.se_stop; end
+end
+class AudioState
+  attr_reader :bgm_resumes,:bgs_resumes
+  def initialize; @bgm_resumes=@bgs_resumes=0; end
+  def playing_bgm; "song"; end
+  def playing_bgs; "ambience"; end
+  def bgm_pause; @bgm_paused=true; end
+  def bgs_pause; @bgs_paused=true; end
+  def bgm_resume(track); @bgm_paused=false; @bgm_resumes+=1; end
+  def bgs_resume(track); @bgs_paused=false; @bgs_resumes+=1; end
+end
+$game_system=AudioState.new
+$PokemonSystem=Struct.new(:sevolume).new(80)
+def pbMessage(text); $messages<<text; end
+def echoln(text); end
+module NordelunaVideo
+  module WindowsPlayer
+    def self.play(*args); raise "Windows DLL called on Android" if $android; $windows_calls+=1; end
+  end
+  module MovieInfo; def self.duration(path); raise "Android needlessly parsed desktop duration" if $android; 2.0; end; end
+end
+"video doubles ready"

@@ -1,0 +1,31 @@
+$checks=0
+def check(value,message); raise message unless value; $checks+=1; end
+check(pbVideo("001"),"Android MP4 dispatch failed")
+packet=$last_packet.split("\n")
+check(packet[1]=="Movies/001.mp4" && packet[2]=="80", "Native path/volume differs")
+check($windows_calls==0,"Android invoked Windows player")
+check(Graphics.brightness==210,"Brightness not restored")
+check($game_system.bgm_resumes==1 && $game_system.bgs_resumes==1,"Audio not restored after completion")
+$media_reply="OK\nskipped"
+check(pbVideo("001",:mapa),"Native skipped playback failed")
+check($last_packet.split("\n")[2]=="0","Muted map profile played movie sound")
+check($game_system.bgm_resumes==1,"Map profile restarted background music")
+$media_reply="ERROR\nDecoder de teste indisponivel"
+check(!pbVideo("002"),"Native error not surfaced")
+check($messages.last.include?("Decoder de teste"),"Native diagnostic lost")
+check(Graphics.brightness==210,"Error left game black")
+check($game_system.bgm_resumes==2 && $game_system.bgs_resumes==3,"Error did not restore audio")
+$media_reply=nil
+check(!pbVideo("001"),"Stalled native player did not time out")
+check($messages.last.include?("parou de responder"),"Wrong watchdog diagnostic")
+check($files.keys.any? { |p| p.end_with?(".cancel") },"Stalled native player not cancelled")
+check(Graphics.brightness==210,"Timeout left game black")
+$files.delete($bridge+"/session")
+check(!pbVideo("001"),"Old APK incorrectly accepted native playback")
+check($messages.last.include?("Atualize o APK"),"Old APK error is not actionable")
+check($windows_calls==0,"Old APK fell back to user32")
+$android=false
+check(pbVideo("001"),"Desktop playback regression")
+check($windows_calls==1,"Desktop player not selected")
+check(Graphics.brightness==210,"Desktop brightness regression")
+"video checks passed"

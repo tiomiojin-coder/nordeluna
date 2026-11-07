@@ -1,0 +1,38 @@
+# Use the actual Game_Map class and actual Essentials interpreter helpers.
+# The old double incorrectly added Game_Map#interpreter, hiding this bug.
+real_map=Game_Map.allocate
+check(!real_map.respond_to?(:interpreter),'fixture does not match actual Game_Map API')
+$game_map=real_map
+$game_map.map_id=42
+$game_system=Game_System.allocate
+interpreter=Struct.new(:running?).new(false)
+$game_system.instance_variable_set(:@map_interpreter,interpreter)
+$game_temp.in_battle=$game_temp.in_menu=$game_temp.message_window_showing=false
+channel=NordelunaOnline::MapChannel
+channel.abandon
+check(channel.safe_map?,'idle map rejected with actual interpreter location')
+interpreter[:running?]=true
+check(!channel.safe_map?,'map event running on Game_System was ignored')
+
+$PokemonGlobal.nordeluna_online_pending={'url'=>'https://example.org','code'=>'ABCDEFGH','side'=>0}
+NordelunaOnline.instance_variable_set(:@recovery_notified_ticket,nil)
+NordelunaOnline.offer_pending_recovery
+check(NordelunaOnline.instance_variable_get(:@recovery_notified_ticket).nil?,'trade recovery prompt interrupted an active event')
+$PokemonGlobal.nordeluna_online_pending=nil
+
+areas=NordelunaOnline::Areas
+areas.instance_variable_set(:@inside,true)
+areas.instance_variable_set(:@return_pending,true)
+$PokemonGlobal.nordeluna_online_return={'map'=>42,'x'=>15,'y'=>22,'direction'=>8,'schema'=>1}
+areas.update
+check(areas.instance_variable_get(:@return_pending),'return recovery ran in the middle of a map event')
+$PokemonGlobal.nordeluna_online_return=nil
+areas.reset_runtime
+
+interpreter[:running?]=false
+check(channel.safe_map?,'map did not resume after event ended')
+$game_system=nil
+check(channel.safe_map?,'startup without Game_System should be handled by the Essentials helper')
+$game_map=nil
+check(!channel.safe_map?,'startup without a map was treated as ready')
+'OK: actual Game_Map/Game_System and Essentials helpers: idle, active event, trade/area recovery, startup; no Game_Map#interpreter dependency.'

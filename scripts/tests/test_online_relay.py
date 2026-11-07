@@ -1,6 +1,8 @@
 import concurrent.futures
 import importlib.util
 import json
+import re
+import secrets
 from pathlib import Path
 import tempfile
 import threading
@@ -19,14 +21,45 @@ class RelayTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.path = str(Path(self.temp.name) / "relay.sqlite3")
-        self.store = relay.Store(self.path)
+        self.areas = dict(plaza=1, coliseum=5, market=6)
+        self.store = relay.Store(self.path, self.areas)
+        self.credentials = {}
+
+    def prepare(self, action, data, invoke=None):
+        invoke = invoke or (lambda action, **data: self.store.handle(dict(protocol=1, action=action, **data)))
+        if action in ("create", "join", "map_join") and isinstance(data.get("profile"), dict) and "account" not in data:
+            credentials = self.credentials.get(data.get("resume"))
+            if credentials is None:
+                name = re.sub("[^A-Za-z0-9_]", "", data["profile"].get("name", "Tester"))[:12]
+                if len(name) < 3:
+                    name = "Tester"
+                base, counter = name, 1
+                while self.store.db.execute("SELECT 1 FROM accounts WHERE normalized=?", (name.lower(),)).fetchone():
+                    counter += 1; name = base + str(counter)
+                credentials = dict(id=secrets.token_hex(16), secret=secrets.token_hex(32))
+                invoke("account_register", account=credentials, nickname=name)
+            data = dict(data, account=credentials)
+        if action == "map_update" and isinstance(data.get("state"), dict):
+            row = self.store.presence.get(data.get("token"))
+            if row:
+                state = dict(direction=2, frame=0, moving=False, character="trainer_RED", seq=row["movement_seq"] + 1)
+                state.update(data["state"])
+                target = state.get("map")
+                if type(target) is int and target in self.areas.values() and target != row["authorized_map"]:
+                    invoke("map_enter", token=data["token"], map=target)
+                data = dict(data, state=state)
+        return data
 
     def tearDown(self):
         self.store.db.close()
         self.temp.cleanup()
 
     def call(self, action, **data):
-        return self.store.handle(dict(protocol=1, action=action, **data))
+        data = self.prepare(action, data)
+        result = self.store.handle(dict(protocol=1, action=action, **data))
+        if action == "map_join":
+            self.credentials[result["token"]] = data["account"]
+        return result
 
     def pair(self, mode="battle"):
         args = dict(mode=mode, build="cross-platform-1", profile=dict(name="Luna", type="POKEMONTRAINER_Red", id=1), payload=[{"test": "pokemon"}])
@@ -74,7 +107,7 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(a["rules"], "level50")
         self.assertEqual(b["rules"], "level50")
         self.store.db.close()
-        self.store = relay.Store(self.path)
+        self.store = relay.Store(self.path, self.areas)
         self.assertEqual(self.call("poll", **self.auth(a))["rules"], "level50")
         args["rules"] = "arbitrary_ruby_class"
         with self.assertRaises(relay.ProtocolError):
@@ -101,7 +134,7 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(guest["rules"], rules)
         self.assertEqual(guest["players"][0]["profile"]["name"], "MeuNick")
         self.store.db.close()
-        self.store = relay.Store(self.path)
+        self.store = relay.Store(self.path, self.areas)
         self.assertEqual(self.call("poll", **self.auth(host))["rules"], rules)
         for bad in (dict(rules, level=True), dict(rules, count=1), dict(rules, count=7),
                     dict(rules, legendaries=1), dict(rules, format="triple"), dict(rules, extra=True)):
@@ -144,13 +177,90 @@ class RelayTests(unittest.TestCase):
         with self.assertRaises(relay.ProtocolError):
             self.call("map_update", token=token, state=dict(map=1, x=1, y=1), emote="arbitrary text")
 
+    def test_chat_room_isolation_server_nick_time_and_idempotent_send(self):
+        def join(room="ABCDEFGH", build="new", name="Luna"):
+            return self.call("map_join", room=room, build=build, profile=dict(name=name))
+        a, b = join(), join(name="Sol")
+        outside, old = join("BCDEFGHJ"), join(build="old")
+        state = dict(map=1, x=3, y=4)
+        def update(player, **data):
+            return self.call("map_update", token=player["token"], state=state, chat_enabled=True, **data)
+        client_id = "a" * 32
+        with patch.object(relay.time, "time", return_value=1794012345):
+            sent = update(a, chat=dict(client_id=client_id, text="Olá Noctgeist!", nick="Impostor", timestamp=0))
+        self.assertEqual(sent["chat_ack"], client_id)
+        row = sent["messages"][0]
+        self.assertEqual((row["nick"], row["timestamp"], row["text"]), ("Luna", 1794012345, "Olá Noctgeist!"))
+        self.assertEqual(update(b)["messages"], sent["messages"])
+        self.assertEqual(update(outside)["messages"], [])
+        self.assertEqual(update(old)["messages"], [])
+        again = update(a, chat=dict(client_id=client_id, text="Olá Noctgeist!"))
+        self.assertEqual(len(again["messages"]), 1)
+        self.assertEqual(update(b, after=row["id"], chat_epoch=sent["chat_epoch"])["messages"], [])
+        with self.assertRaises(relay.ProtocolError):
+            update(a, chat=dict(client_id="b" * 32, text="spam"))
+        with self.assertRaises(relay.ProtocolError):
+            update(b, chat=dict(client_id=client_id, text="Olá Noctgeist!"))
+        with self.assertRaises(relay.ProtocolError):
+            update(a, chat=dict(client_id=client_id, text="edited"))
+        for text in ("", "x" * 121, "<red>bad", "line\nbreak"):
+            with self.assertRaises(relay.ProtocolError):
+                update(b, chat=dict(client_id="c" * 32, text=text))
+        self.assertNotIn(a["token"], json.dumps(sent))
+
+    def test_room_resume_after_presence_expiry_and_explicit_leave(self):
+        args = dict(room="ABCDEFGH", build="new", profile=dict(name="Luna"))
+        with patch.object(relay.time, "monotonic", return_value=100) as clock:
+            original = self.call("map_join", **args)
+            self.call("map_update", token=original["token"], state=dict(map=1, x=1, y=1),
+                      chat_enabled=True, chat=dict(client_id="a" * 32, text="Mensagem com resposta perdida"))
+            clock.return_value = 120
+            restored = self.call("map_join", resume=original["token"], **args)
+            self.assertTrue(restored["resumed"])
+            self.assertEqual((restored["token"], restored["id"], restored["room"]),
+                             (original["token"], original["id"], "ABCDEFGH"))
+            retried = self.call("map_update", token=restored["token"], state=dict(map=1, x=1, y=1),
+                                chat_enabled=True, chat=dict(client_id="a" * 32, text="Mensagem com resposta perdida"))
+            self.assertEqual(len(retried["messages"]), 1)
+            self.assertEqual(retried["chat_ack"], "a" * 32)
+            wrong = self.call("map_join", resume=original["token"], **dict(args, room="BCDEFGHJ"))
+            self.assertFalse(wrong["resumed"])
+            self.assertNotEqual(wrong["id"], original["id"])
+            with self.assertRaises(relay.ProtocolError):
+                self.call("map_leave", token=restored["token"])
+            fresh = self.call("map_join", resume=original["token"], **args)
+            self.assertFalse(fresh["resumed"])
+            clock.return_value = 250
+            expired = self.call("map_join", resume=fresh["token"], **args)
+            self.assertFalse(expired["resumed"])
+
+    def test_chat_history_bounded_epoch_restart_and_no_trade_database_changes(self):
+        args = dict(room="ABCDEFGH", build="new", profile=dict(name="Luna"))
+        with patch.object(relay.time, "monotonic", return_value=100) as clock:
+            player = self.call("map_join", **args)
+            for number in range(85):
+                clock.return_value = 100 + number * 3
+                view = self.call("map_update", token=player["token"], state=dict(map=1, x=1, y=1),
+                                 chat_enabled=True, chat=dict(client_id=format(number, "032x"), text="Oi " + str(number)))
+            self.assertEqual(len(view["messages"]), 80)
+            self.assertEqual(view["messages"][0]["text"], "Oi 5")
+            old_epoch = view["chat_epoch"]
+        self.assertEqual(self.store.db.execute("SELECT COUNT(*) FROM rooms").fetchone()[0], 0)
+        self.store.db.close()
+        self.store = relay.Store(self.path, self.areas)
+        fresh = self.call("map_join", **args)
+        view = self.call("map_update", token=fresh["token"], state=dict(map=1, x=1, y=1),
+                         chat_enabled=True, chat_epoch=old_epoch, after=99999)
+        self.assertNotEqual(old_epoch, view["chat_epoch"])
+        self.assertEqual(view["messages"], [])
+
     def test_trade_commit_survives_restart_and_cancel(self):
         a, b = self.pair("trade")
         first = self.call("confirm", **self.auth(a))
         self.assertEqual(first["status"], "active")
         self.assertEqual(self.call("confirm", **self.auth(b))["status"], "committed")
         self.store.db.close()
-        self.store = relay.Store(self.path)
+        self.store = relay.Store(self.path, self.areas)
         self.assertEqual(self.call("poll", **self.auth(a))["status"], "committed")
         self.assertEqual(self.call("cancel", **self.auth(b))["status"], "committed")
         self.assertEqual(self.call("confirm", **self.auth(a))["status"], "committed")
@@ -193,10 +303,15 @@ class RelayTests(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         url = f"http://127.0.0.1:{server.server_port}/api"
-        def post(data):
+        def raw_post(data):
             req = urllib.request.Request(url, data=json.dumps(data).encode(), headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=3) as response:
                 return json.load(response)
+        def invoke(action, **data):
+            return raw_post(dict(protocol=1, action=action, **data))
+        def post(data):
+            action = data["action"]
+            return raw_post(self.prepare(action, data, invoke))
         try:
             args = dict(protocol=1, build="same-PC-Android", mode="trade", profile=dict(name="Sol", type="TRAINER", id=8), payload=[{"pokemon": "Pikachu"}])
             host = post(dict(args, action="create"))
@@ -211,6 +326,12 @@ class RelayTests(unittest.TestCase):
             post(dict(protocol=1, action="map_update", token=a["token"], state=state, emote="celebrate"))
             peers = post(dict(protocol=1, action="map_update", token=b["token"], state=state))["peers"]
             self.assertEqual((peers[0]["name"], peers[0]["emote"]), ("NickA", "celebrate"))
+            sent = post(dict(protocol=1, action="map_update", token=a["token"], state=state,
+                             chat_enabled=True, chat=dict(client_id="a" * 32, text="Olá, praça!")))
+            history = post(dict(protocol=1, action="map_update", token=b["token"], state=state, chat_enabled=True))
+            self.assertEqual(history["messages"], sent["messages"])
+            self.assertEqual(history["messages"][0]["nick"], "NickA")
+            self.assertIsInstance(history["messages"][0]["timestamp"], int)
             with self.assertRaises(urllib.error.HTTPError) as caught:
                 post(dict(protocol=1, action="poll", code=host["code"], token="stolen"))
             self.assertEqual(caught.exception.code, 400)

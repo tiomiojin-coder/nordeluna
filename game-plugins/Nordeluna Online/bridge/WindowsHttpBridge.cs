@@ -35,7 +35,9 @@ internal static class WindowsHttpBridge {
             if (!ParentAlive()) running = false;
             lock (gate) {
                 if (!running) { if (active != null) active.Abort(); return; }
-                Marker("status", "1");
+                // Status is immutable for this process lifetime. Replacing it every
+                // 200 ms races Ruby's Windows file sharing and produces EACCES.
+                if (!File.Exists(Path.Combine(folder, "status"))) Marker("status", "1");
                 if (active != null && (uptime.ElapsedMilliseconds - started > 10000 ||
                         File.Exists(Path.Combine(folder, activeId + ".cancel")))) active.Abort();
             }
@@ -99,7 +101,7 @@ internal static class WindowsHttpBridge {
             string game = Path.GetFullPath(args[0]);
             parent = Process.GetProcessById(Int32.Parse(args[1]));
             if (parent.Handle == IntPtr.Zero) return;
-            folder = Path.Combine(game, ".nordeluna-online-bridge-windows-" + args[1]);
+            folder = Path.Combine(game, ".nordeluna-online-bridge-windows-v2-" + args[1]);
             Directory.CreateDirectory(folder);
             log = Path.Combine(game, "nordeluna-online-transport.log");
             foreach (string old in Directory.GetFiles(folder)) {

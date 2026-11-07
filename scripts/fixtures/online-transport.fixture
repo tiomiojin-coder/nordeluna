@@ -12,6 +12,10 @@ module BridgeFixtureFiles
   def binwrite(path, text); return super unless bridge_path?(path); $bridge_files[File.expand_path(path)] = text.dup; text.bytesize; end
   def binread(path)
     return super unless bridge_path?(path)
+    if $bridge_locked_path == File.expand_path(path) && $bridge_locked_reads.to_i > 0
+      $bridge_locked_reads -= 1
+      raise Errno::EACCES, path
+    end
     $bridge_files.fetch(File.expand_path(path)) { raise Errno::ENOENT, path }
   end
   def file?(path); bridge_path?(path) ? $bridge_files.key?(File.expand_path(path)) : super; end
@@ -32,7 +36,7 @@ module NordelunaOnline
   class << self
     alias frame_before_bridge_test frame
     def frame
-      directory = Transport.android? ? File.join(Dir.pwd, '.nordeluna-online-bridge') : File.join(Dir.pwd, ".nordeluna-online-bridge-windows-#{Process.pid}")
+      directory = Transport.android? ? File.join(Dir.pwd, '.nordeluna-online-bridge') : File.join(Dir.pwd, ".nordeluna-online-bridge-windows-v2-#{Process.pid}")
       if $bridge_resume_test
         File.binwrite(File.join(directory, 'status'), '1')
         $bridge_resume_test = false
@@ -83,7 +87,7 @@ module System
 end
 module BridgeFixtureHelper
   def file?(path)
-    return true if path.to_s.end_with?('/bridge/WindowsHttpBridge.exe')
+    return true if path.to_s.end_with?('/bridge/WindowsHttpBridge-2.exe')
     super
   end
 end
@@ -93,7 +97,7 @@ module Process
     alias spawn_before_bridge_fixture spawn
     def spawn(*args)
       $bridge_spawn_arguments = args
-      directory = File.join(Dir.pwd, ".nordeluna-online-bridge-windows-#{pid}")
+      directory = File.join(Dir.pwd, ".nordeluna-online-bridge-windows-v2-#{pid}")
       File.binwrite(File.join(directory,'session'),'test-session')
       File.binwrite(File.join(directory,'status'),'1')
       1234
@@ -112,7 +116,7 @@ end
 module NordelunaOnline
   class << self
     def frame
-      directory = File.join(Dir.pwd, ".nordeluna-online-bridge-windows-#{Process.pid}")
+      directory = File.join(Dir.pwd, ".nordeluna-online-bridge-windows-v2-#{Process.pid}")
       Dir.glob(File.join(directory,'*.request')).each do |file|
         File.binwrite(file.sub(/\.request\z/,'.response'), "200\n{\"ok\":true}")
         File.delete(file)
@@ -122,8 +126,23 @@ module NordelunaOnline
   end
 end
 check(NordelunaOnline.request('https://example.org',{'action'=>'health'})['ok'], 'Windows bypassed mailbox')
-check($bridge_spawn_arguments[0].end_with?('WindowsHttpBridge.exe') && $bridge_spawn_arguments[1] == Dir.pwd && $bridge_spawn_arguments[2] == Process.pid.to_s,
+check($bridge_spawn_arguments[0].end_with?('WindowsHttpBridge-2.exe') && $bridge_spawn_arguments[1] == Dir.pwd && $bridge_spawn_arguments[2] == Process.pid.to_s,
       'Windows helper launch used a shell or wrong parent')
+# Reproduce Windows sharing violations on the actual ticket, before a reply.
+ticket = NordelunaOnline::Transport::WindowsTicket.new('https://example.org/api', '{}')
+$bridge_locked_path = File.expand_path(File.join(ticket.mailbox_directory, 'status'))
+$bridge_locked_reads = 3
+3.times { check(ticket.alive?, 'temporary sharing lock escaped instead of retrying') }
+check(ticket.alive?, 'ticket failed to recover after sharing lock')
+$bridge_locked_reads = 100
+ticket.instance_variable_set(:@access_retry_until, NordelunaOnline.now - 1)
+begin
+  ticket.alive?
+  raise 'permanent marker lock was not bounded'
+rescue NordelunaOnline::ConnectionLost
+end
+$bridge_locked_path = nil
+ticket.cancel
 module Process
   class << self; alias spawn spawn_before_bridge_fixture; end
 end

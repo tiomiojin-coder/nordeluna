@@ -54,6 +54,11 @@ while IFS= read -r -d '' mp3_file; do
   fi
 done < <(find "$GAME_DIR/Audio" -type f -iname '*.mp3' -print0)
 
+# The Android media stack reads MP4 directly. Bound dimensions, frame rate and
+# codec profile for phones whose hardware decoder rejects desktop-sized clips
+# (e.g. a 1932px-wide source). Only this extracted build is modified.
+python3 "$SCRIPT_DIR/prepare-android-movies.py" "$GAME_DIR"
+
 # More simultaneous sound-effect sources help Essentials scenes that layer
 # menu, battle and ambient effects. Path caching also fixes case-sensitive and
 # accented filename lookups after extraction on Android/Linux.

@@ -1,0 +1,70 @@
+class Color
+  attr_accessor :red, :green, :blue, :alpha
+  def initialize(r=0,g=0,b=0,a=255); @red,@green,@blue,@alpha=r,g,b,a; end
+end
+Rect = Struct.new(:x,:y,:width,:height)
+class Bitmap
+  attr_reader :width,:height,:font,:draws
+  def initialize(width,height=nil)
+    @width,@height = height ? [width,height] : ASSET_DIMS.fetch(width.to_s.end_with?(".png") ? width : width+".png", [64,64])
+    @font = Struct.new(:size,:bold,:color).new(22,false,Color.new)
+    @draws = []
+  end
+  def clear; @draws.clear; end
+  def fill_rect(*args); end
+  def stretch_blt(*args); end
+  def text_size(text); Rect.new(0,0,(text.to_s.length * font.size * 0.52).ceil,font.size); end
+  def draw_text(x,y,w,h,text,align=0)
+    @draws << {x:x,y:y,w:w,h:h,text:text,align:align,size:font.size}
+  end
+  def disposed?; !!@disposed; end
+  def dispose; raise "Bitmap double disposal" if disposed?; @disposed = true; end
+end
+class Sprite
+  attr_accessor :bitmap,:x,:y,:z,:ox,:oy,:opacity,:visible,:color,:src_rect
+  def initialize(viewport=nil)
+    @x=@y=@z=@ox=@oy=0; @opacity=255; @visible=true
+    @src_rect=Rect.new(0,0,0,0)
+  end
+  def update; raise "Updated disposed sprite" if disposed?; end
+  def disposed?; !!@disposed; end
+  def dispose; raise "Sprite double disposal" if disposed?; @disposed=true; end
+end
+class AnimatedBitmap
+  attr_reader :bitmap
+  def initialize(path); @bitmap=Bitmap.new(path); end
+  def width; bitmap.width; end
+  def height; bitmap.height; end
+  def dispose; bitmap.dispose; end
+end
+class Battle; class Scene; end; end
+$PokemonSystem = Struct.new(:battle_ui).new(0)
+def _INTL(text,*values); text.gsub(/\{(\d+)\}/) { values[$1.to_i-1].to_s }; end
+def pbSetSystemFont(bitmap); end
+def pbDrawTextPositions(bitmap,positions)
+  positions.each { |text,x,y,align,*_| bitmap.draw_text(x,y,100,32,text,align) }
+end
+module Graphics
+  def self.width; 512; end
+  def self.height; 384; end
+  def self.frame_rate; 60; end
+  def self.update; $clock += 1.0/60; end
+end
+module Input; def self.update; end; end
+module System; def self.uptime; raise "Unnormalized platform uptime used"; end; end
+$clock = 123.0
+module Process
+  def self.clock_gettime(kind); raise "Wrong clock" unless kind == CLOCK_MONOTONIC; $clock; end
+end
+class << File
+  def file?(path); ASSET_DIMS.key?(path); end
+end
+module EventHandlers; def self.add(*args); end; end
+class Spriteset_Map; def self.viewport; nil; end; end
+class Game_Map
+  REAL_RES_X=REAL_RES_Y=128
+  X_SUBPIXELS=Y_SUBPIXELS=4
+end
+def pbDayNightTint(sprite); end
+class Scene_Map; end
+"display doubles ready"

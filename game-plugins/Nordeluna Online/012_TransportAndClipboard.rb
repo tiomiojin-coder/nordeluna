@@ -38,8 +38,8 @@ module NordelunaOnline
         deadline = NordelunaOnline.now + 3
         loop do
           if File.file?(File.join(@directory, "session")) && ready?
-            @session = File.binread(File.join(@directory, "session"))
-            break unless @session.empty?
+            @session = read_marker("session")
+            break if @session && !@session.empty?
           end
           if NordelunaOnline.now >= deadline
             message = File.file?(File.join(@directory, "session")) ?
@@ -60,9 +60,16 @@ module NordelunaOnline
       def path(extension); File.join(@directory, "#{@id}.#{extension}"); end
 
       def ready?
-        status = File.join(@directory, "status")
         # Wall-clock/mtime checks caused false failures after resume or clock changes.
-        File.file?(status) && File.binread(status) == "1"
+        read_marker("status") == "1"
+      end
+
+      def read_marker(name)
+        marker = File.join(@directory, name)
+        File.file?(marker) ? File.binread(marker) : nil
+      rescue Errno::EACCES, Errno::EPERM
+        # Antivirus scanners and legacy brokers can briefly lock a marker.
+        nil
       end
 
       def alive?
@@ -70,15 +77,25 @@ module NordelunaOnline
         if File.file?(path("response"))
           raise ConnectionLost, "Resposta de rede grande demais." if File.size(path("response")) > MAX_RESPONSE + 1024
           raw = File.binread(path("response"))
-          File.delete(path("response"))
           status, body = raw.split("\n", 2)
           raise ConnectionLost, body.to_s if status == "ERROR"
           raise ConnectionLost, "Resposta do transporte invalida." unless status.match?(/\A[1-5][0-9]{2}\z/)
           @result = { :status => status.to_i, :body => body.to_s.force_encoding("UTF-8") }
+          begin
+            File.delete(path("response"))
+          rescue SystemCallError
+          end
           return false
         end
-        state = File.file?(File.join(@directory, "status")) && File.binread(File.join(@directory, "status"))
+        state = File.binread(File.join(@directory, "status"))
         raise ConnectionLost, "Conexao interrompida. O aplicativo foi pausado ou reiniciado." if state == "0" || File.binread(File.join(@directory, "session")) != @session
+        @access_retry_until = nil
+        true
+      rescue Errno::EACCES, Errno::EPERM
+        @access_retry_until ||= NordelunaOnline.now + 1
+        if NordelunaOnline.now >= @access_retry_until
+          raise ConnectionLost, "O Windows bloqueou o transporte online. Feche e reabra o jogo e confira o antivirus."
+        end
         true
       rescue Errno::ENOENT
         raise ConnectionLost, "O transporte de rede foi reiniciado. Abra outra sala."
@@ -121,28 +138,29 @@ module NordelunaOnline
     end
 
     class WindowsTicket < AndroidTicket
-      def mailbox_directory; File.join(Dir.pwd, ".nordeluna-online-bridge-windows-#{Process.pid}"); end
+      def mailbox_directory; File.join(Dir.pwd, ".nordeluna-online-bridge-windows-v2-#{Process.pid}"); end
       def initialize(endpoint, body)
         self.class.ensure_broker
         super
       end
 
       def self.ensure_broker
-        if @pid
+        helper = File.join(Dir.pwd, "Plugins", "Nordeluna Online", "bridge", "WindowsHttpBridge-2.exe")
+        if @pid && @helper == helper
           begin
             return unless Process.waitpid(@pid, Process::WNOHANG)
           rescue Errno::ECHILD
           end
           @pid = nil
         end
-        helper = File.join(Dir.pwd, "Plugins", "Nordeluna Online", "bridge", "WindowsHttpBridge.exe")
         raise ConnectionLost, "O transporte Windows esta ausente. Instale o patch completo do Online." unless File.file?(helper)
         %w[session status].each do |name|
-          stale = File.join(Dir.pwd, ".nordeluna-online-bridge-windows-#{Process.pid}", name)
+          stale = File.join(Dir.pwd, ".nordeluna-online-bridge-windows-v2-#{Process.pid}", name)
           File.delete(stale) if File.file?(stale)
         end
         # A Windows GUI executable has no console. Pass an argument vector, never a shell command.
         @pid = Process.spawn(helper, Dir.pwd, Process.pid.to_s, :out => File::NULL, :err => File::NULL)
+        @helper = helper
       rescue SystemCallError
         raise ConnectionLost, "Nao foi possivel iniciar o transporte Windows. Confira o antivirus e o patch do jogo."
       end

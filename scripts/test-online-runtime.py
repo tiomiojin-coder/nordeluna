@@ -30,6 +30,14 @@ prefixes = ["000_", "001_", "015_", "035_", "100_", "103_", "104_", "105_", "106
 for prefix in prefixes:
     p = next(engine.glob(prefix + "*"))
     chunks.append((p.name, p.read_text(encoding="utf-8")))
+for prefix in ("040_", "042_"):
+    p = next(engine.glob(prefix + "*"))
+    chunks.append(("actual system/map API " + p.name, p.read_text(encoding="utf-8")))
+message_source = (engine / "088_Messages.rb").read_text(encoding="utf-8")
+for name in ("pbMapInterpreter", "pbMapInterpreterRunning?"):
+    start = message_source.index("def " + name + "\n")
+    end = message_source.index("\nend", start) + len("\nend")
+    chunks.append(("actual event lookup " + name, message_source[start:end]))
 metrics_script = next(engine.glob("131_*"))
 chunks.append(("actual species metrics", metrics_script.read_text(encoding="utf-8")))
 data_packets = {f"Data/{p.name}": p.read_bytes().hex() for p in (GAME / "Data").glob("*.dat")}
@@ -54,7 +62,8 @@ maintained = Path(__file__).resolve().parents[1] / "game-plugins/Nordeluna Onlin
 sources = {p.name: p for p in (PLUGINS / "Nordeluna Online").glob("*.rb")}
 sources.update({p.name: p for p in maintained.glob("*.rb")})
 for p in (sources[name] for name in sorted(sources)):
-    chunks.append((p.name, p.read_text(encoding="utf-8")))
+    if p.name < "016_":
+        chunks.append((p.name, p.read_text(encoding="utf-8")))
 chunks.append(("checks", (HERE / "checks.fixture").read_text(encoding="utf-8")))
 chunks.append(("battle checks", (HERE / "battle.fixture").read_text(encoding="utf-8")))
 # Exercise the actual Pokemon extension from the installed MUI plugin.
@@ -85,7 +94,14 @@ target_methods = [re.search(r"(?ms)^  def " + name + r"\(.*?(?=^  def )", target
                   for name in ("pbChooseTarget", "pbFirstTarget", "pbCreateTargetTexts")]
 chunks.append(("actual target scene", "class Battle::Scene::RealOnlineTargetFixture < Battle::Scene\n" + "\n".join(target_methods) + "\nend"))
 chunks.append(("real target UI, six Noctgeist team and Mega", (Path(__file__).resolve().parent / "fixtures/online-polish.fixture").read_text(encoding="utf-8")))
+chunks.append(("room reconnect, chat panel and diagnostics", (Path(__file__).resolve().parent / "fixtures/online-room-chat.fixture").read_text(encoding="utf-8")))
 chunks.append(("Android transport and clipboard", (Path(__file__).resolve().parent / "fixtures/online-transport.fixture").read_text(encoding="utf-8")))
+chunks.append(("area/save display doubles", (Path(__file__).resolve().parent / "fixtures/online-areas-support.fixture").read_text(encoding="utf-8")))
+for name in sorted(sources):
+    if name >= "016_":
+        chunks.append((name, sources[name].read_text(encoding="utf-8")))
+chunks.append(("social areas and recovery", (Path(__file__).resolve().parent / "fixtures/online-areas.fixture").read_text(encoding="utf-8")))
+chunks.append(("real Essentials map interpreter regression", (Path(__file__).resolve().parent / "fixtures/online-interpreter.fixture").read_text(encoding="utf-8")))
 state = ctypes.c_int()
 # ctypes embeds Ruby without a native Ruby main stack. Disable conservative GC
 # in this short-lived test process, as its stack scanner cannot scan Python's.

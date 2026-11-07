@@ -139,8 +139,10 @@ module NordelunaOnline
 
     def connect(mode, join)
       session = nil
+      room_suspended = false
       return unless valid_nickname?($PokemonGlobal.nordeluna_online_nickname) || configure_nickname
-      MapChannel.disconnect if defined?(MapChannel)
+      MapChannel.suspend if defined?(MapChannel)
+      room_suspended = true
       rule_id = "free"
       data = { "action" => join ? "join" : "create", "mode" => mode, "profile" => profile, "build" => build }
       url = server
@@ -179,6 +181,7 @@ module NordelunaOnline
       mode == "battle" ? start_battle(session, room) : start_trade(session, room, slot)
     ensure
       session.call("cancel") rescue nil if session && !pending_trade
+      MapChannel.resume if room_suspended && defined?(MapChannel)
     end
   end
   singleton_class.prepend(ProfileAndRules)

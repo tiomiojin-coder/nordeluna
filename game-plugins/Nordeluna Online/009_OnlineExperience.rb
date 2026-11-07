@@ -97,7 +97,8 @@ module NordelunaOnline
         raise VersionMismatch, _INTL("Servidor incompativel. Atualize o relay para revisao 2 ou superior.")
       end
       result = { "server" => server, "latency_ms" => @connection_latency_ms,
-        "protocol" => reply["protocol"], "revision" => reply["revision"], "build" => BUILD }
+        "protocol" => reply["protocol"], "revision" => reply["revision"], "build" => BUILD,
+        "version" => reply["version"], "areas" => reply["areas"] }
       if show
         pbMessage(_INTL("Servidor acessivel!\nLatencia: {1} ms\nProtocolo: {2} / revisao {3}\nCliente: {4}\nA versao do outro jogador e conferida ao entrar na sala.",
           result["latency_ms"], result["protocol"], result["revision"], VERSION))
@@ -215,12 +216,12 @@ module NordelunaOnline
           recover_trade
           return if pending_trade
         end
-        labels = [_INTL("Testar conexao"), _INTL("PvP: criar sala"), _INTL("PvP: entrar em sala"),
+        labels = [_INTL("Diagnostico online"), _INTL("PvP: criar sala"), _INTL("PvP: entrar em sala"),
           _INTL("Troca: criar sala"), _INTL("Troca: entrar em sala"), _INTL("Comprovantes de troca"),
-          _INTL("Servidor"), _INTL("Meu nick"), _INTL("Emotes no mapa"), _INTL("Sair")]
+          _INTL("Servidor"), _INTL("Meu nick"), _INTL("Emotes no mapa"), _INTL("Sala e chat"), _INTL("Sair")]
         choice = pbMessage(_INTL("Nordeluna Online - {1}\nNick: {2}", VERSION, nickname), labels, labels.length)
         case choice
-        when 0 then test_connection
+        when 0 then ChatPanel.modal_loop(:diagnostic)
         when 1 then connect("battle", false)
         when 2 then connect("battle", true)
         when 3 then connect("trade", false)
@@ -229,6 +230,7 @@ module NordelunaOnline
         when 6 then configure_server
         when 7 then configure_nickname
         when 8 then return :sent if map_emotes_menu == :sent
+        when 9 then return :sent if room_menu == :sent
         else return
         end
       end
@@ -253,7 +255,7 @@ module NordelunaOnline
     return unless $player && $PokemonGlobal && pending_trade
     return if @recovery_prompt_active || !defined?(Scene_Map) || !$scene.is_a?(Scene_Map)
     return if !$game_temp || $game_temp.in_battle || $game_temp.in_menu || $game_temp.message_window_showing
-    return if $game_map && $game_map.interpreter.running?
+    return if pbMapInterpreterRunning?
     key = [pending_trade["url"], pending_trade["code"], pending_trade["side"]]
     return if @recovery_notified_ticket == key
     @recovery_notified_ticket = key

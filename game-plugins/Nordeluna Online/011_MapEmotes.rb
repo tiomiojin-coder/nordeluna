@@ -10,7 +10,7 @@ module NordelunaOnline
       def safe_map?
         defined?(Scene_Map) && $scene.is_a?(Scene_Map) && $game_temp &&
           !$game_temp.in_battle && !$game_temp.in_menu && !$game_temp.message_window_showing &&
-          $game_map && !$game_map.interpreter.running? && $game_player
+          $game_map && !pbMapInterpreterRunning? && $game_player
       end
 
       def position
@@ -253,7 +253,7 @@ module NordelunaOnline
       choice = pbMessage(label, [_INTL("Entrar no canal"), _INTL("Acenar"), _INTL("Comemorar"),
         _INTL("Chamar para batalha"), _INTL("Sair do canal"), _INTL("Voltar")], 6)
       case choice
-      when 0 then MapChannel.connect
+      when 0 then return :sent if MapChannel.connect
       when 1, 2, 3
         MapChannel.send_emote(%w[wave celebrate battle][choice - 1])
         return :sent

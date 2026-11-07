@@ -1,0 +1,145 @@
+class RoomReplyTicket
+  def initialize(reply, failure = false); @reply = reply; @failure = failure; end
+  def alive?; false; end
+  def value
+    raise NordelunaOnline::ConnectionLost, 'simulated network drop' if @failure
+    {body: NordelunaOnline::JSON.dump(@reply)}
+  end
+  def cancel; @cancelled = true; end
+end
+$room_fixture = true
+$room_clock = 100.0
+$room_token = 'secret-session-token-never-in-diagnostic'
+$room_replies = []
+$room_calls = []
+$room_epoch = 'epoch-one'
+module RoomFakeAPI
+  def now; $room_fixture ? $room_clock : super; end
+  def build; $room_fixture ? NordelunaOnline::BUILD + '-test-data' : super; end
+  def test_connection(show = true)
+    return super unless $room_fixture
+    observe_server({'version'=>'0.5.0','revision'=>4,'protocol'=>1},35)
+    {'revision'=>4,'protocol'=>1,'version'=>'0.5.0','latency_ms'=>35}
+  end
+  def request(url,data)
+    return super unless $room_fixture
+    $room_calls << data.dup
+    if data['action'] == 'map_join'
+      {'ok'=>true,'room'=>data['room'],'token'=>$room_token,'id'=>'abcdef0123456789','resumed'=>!!data['resume'],'revision'=>4,'version'=>'0.5.0'}
+    else
+      {'ok'=>true}
+    end
+  end
+end
+NordelunaOnline.singleton_class.prepend(RoomFakeAPI)
+module RoomFakeTransport
+  def start(url,data)
+    return super unless $room_fixture
+    $room_calls << data.dup
+    reply = if data['action'] == 'map_join'
+              {'ok'=>true,'room'=>data['room'],'token'=>$room_token,'id'=>'abcdef0123456789','resumed'=>true,'revision'=>4,'version'=>'0.5.0'}
+            else
+              $room_replies.shift || {'ok'=>true,'room'=>'ABCDEFGH','peers'=>[],'messages'=>[],
+                'chat_epoch'=>$room_epoch,'members'=>2,'revision'=>4,'version'=>'0.5.0'}
+            end
+    RoomReplyTicket.new(reply == :drop ? {} : reply, reply == :drop)
+  end
+end
+NordelunaOnline::Transport.singleton_class.prepend(RoomFakeTransport)
+$scene = Scene_Map.new
+$game_temp = Struct.new(:in_battle,:in_menu,:message_window_showing).new(false,false,false)
+$game_map = Struct.new(:map_id,:display_x,:display_y,:interpreter).new(7,0,0,Object.new)
+$game_map.interpreter.define_singleton_method(:running?) { false }
+$game_player = Struct.new(:x,:y).new(3,4)
+$player.define_singleton_method(:id) { 123 }
+$player.define_singleton_method(:trainer_type) { GameData::TrainerType.keys.first }
+channel = NordelunaOnline::MapChannel
+channel.abandon
+check(channel.connect('ABCDEFGH'), 'room connect failed')
+channel.queue_message('Olá praça!')
+client_id = channel.instance_variable_get(:@outbox)[:id]
+row = {'id'=>1,'nick'=>'Lúna','text'=>'Olá praça!','timestamp'=>1794012345}
+reply = {'ok'=>true,'room'=>'ABCDEFGH','peers'=>[],'messages'=>[row],'chat_epoch'=>$room_epoch,
+         'chat_ack'=>client_id,'members'=>2,'version'=>'0.5.0','revision'=>4}
+$room_replies << reply
+channel.update
+channel.update
+check(channel.messages.length == 1 && !channel.instance_variable_get(:@outbox), 'message was not confirmed/deduplicated')
+$room_clock += 2
+$room_replies << reply
+channel.update
+channel.update
+check(channel.messages.length == 1, 'repeated history duplicated message')
+
+# A lost reply keeps the same room and resume token and retries within the window.
+$room_clock += 2
+$room_replies << :drop
+channel.update
+channel.update
+check(channel.connection_label.include?('Reconectando') && channel.desired?, 'drop silently disconnected room')
+$room_clock += 2
+channel.update
+request = $room_calls.last
+check(request['action'] == 'map_join' && request['room'] == 'ABCDEFGH' && request['resume'] == $room_token,
+      'reconnect changed room or dropped resume token')
+channel.update
+check(channel.active? && channel.notice.include?('restaurada'), 'reconnect lacked visible confirmation')
+snapshot = NordelunaOnline.diagnostic_snapshot
+check(snapshot['remote']['revision'] == 4 && snapshot['remote']['version'] == '0.5.0' && snapshot['remote']['latency_ms'].is_a?(Integer), 'diagnostic missing server/latency')
+check(snapshot['last_error']['message'].include?('network drop'), 'last error disappeared after reconnection')
+check(!NordelunaOnline::JSON.dump(snapshot).include?($room_token), 'diagnostic leaked session token')
+
+# Actual panel code draws the nick/time and restores input/menu state when closed.
+class Bitmap
+  def clear; end
+  def text_size(text); Struct.new(:width,:height).new(text.length * 8,18); end
+end
+$chat_sprites = []
+module CaptureRoomSprites
+  def create_sprite(width,height); super.tap { |sprite| $chat_sprites << sprite }; end
+end
+NordelunaOnline::ChatPanel.singleton_class.prepend(CaptureRoomSprites)
+Input.const_set(:MOUSELEFT,99) unless Input.const_defined?(:MOUSELEFT)
+module Input
+  class << self
+    alias trigger_before_chat_fixture trigger?
+    def trigger?(key); key == Input::BACK && NordelunaOnline::ChatPanel.modal?; end
+  end
+end
+$preview_text.clear
+channel.messages << row unless channel.messages.any? { |r| r['id'] == row['id'] }
+panel = NordelunaOnline::ChatPanel
+panel.update
+check($preview_text.any? { |s| s.include?('Lúna: Olá praça!') && s.include?(Time.at(row['timestamp']).strftime('%H:%M')) }, 'collapsed panel omitted nick/time')
+menu_before = $game_temp.in_menu
+panel.open_chat
+check(!panel.modal? && $game_temp.in_menu == menu_before && $chat_sprites.last.disposed?, 'chat modal leaked resources or locked controls')
+panel.modal_loop(:diagnostic)
+check($preview_text.any? { |s| s.include?('Cliente online:') } && $preview_text.any? { |s| s.include?('Ultimo erro') }, 'diagnostic not rendered together')
+check($chat_sprites.last.bitmap.disposed?, 'diagnostic bitmap leaked')
+panel.instance_variable_set(:@modal,true)
+panel.modal_loop(:chat)
+check(panel.modal?, 'nested modal reset outer state')
+panel.instance_variable_set(:@modal,false)
+panel.dispose
+check($chat_sprites.all?(&:disposed?), 'collapsed chat bitmap/sprite not disposed')
+module Input
+  class << self; alias trigger? trigger_before_chat_fixture; end
+end
+
+channel.disconnect
+calls_before = $room_calls.length
+$room_clock += 20
+channel.update
+check(!channel.desired? && $room_calls.length == calls_before, 'explicit leave reconnected automatically')
+channel.connect('ABCDEFGH')
+$room_replies << :drop
+channel.update
+channel.update
+$room_clock += 61
+channel.update
+check(!channel.desired? && channel.connection_label == 'Desconectado', 'reconnect exceeded 60-second window')
+channel.abandon
+$room_fixture = false
+$game_map = nil
+'OK: room resume with visible state, bounded retries and explicit leave; acknowledged chat with nick/time; panel/diagnostic render and input/resource cleanup; no tokens in diagnostic.'

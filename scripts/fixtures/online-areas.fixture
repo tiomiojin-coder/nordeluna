@@ -1,0 +1,167 @@
+module AreaFixtureAPI
+  def now;$area_time;end
+  def build;'area-build-test';end
+  def with_waiting(*args); yield; end
+  def test_connection(*args)
+    {'revision'=>5,'version'=>'0.6.0','protocol'=>1,'areas'=>{'plaza'=>1,'coliseum'=>5,'market'=>6}}
+  end
+end
+NordelunaOnline.singleton_class.prepend(AreaFixtureAPI)
+module AreaFixtureNetwork
+  def request(url,data)
+    $area_calls<<data
+    case data['action']
+    when 'health'
+      {'revision'=>5,'version'=>'0.6.0','protocol'=>1,'areas'=>{'plaza'=>1,'coliseum'=>5,'market'=>6}}
+    when 'account_info'
+      account=$area_accounts[data['account']['id']]
+      raise NordelunaOnline::Error,'Identidade online invalida.' unless account
+      account
+    when 'account_register'
+      account={'id'=>data['account']['id'],'nickname'=>data['nickname']}
+      $area_accounts[account['id']]=account;account
+    when 'account_check'
+      owner=$area_accounts.values.find { |a| a['nickname'].downcase==data['nickname'].downcase }
+      {'available'=>!owner || owner['id']==data.dig('account','id')}
+    when 'map_join'
+      {'room'=>data['room'],'token'=>'area-session-token-123456','id'=>'abcdef0123456789','revision'=>5,'version'=>'0.6.0',
+       'areas'=>{'plaza'=>1,'coliseum'=>5,'market'=>6}}
+    when 'map_enter'
+      {'map'=>data['map'],'room'=>'PRACA','revision'=>5}
+    else
+      {'ok'=>true}
+    end
+  end
+end
+NordelunaOnline::SafeTransport.prepend(AreaFixtureNetwork)
+module AreaFixtureAsync
+  def start(url,data)
+    $area_calls<<data
+    response={'ok'=>true,'room'=>'PRACA','peers'=>[],'messages'=>[],'chat_epoch'=>'area-epoch','members'=>1,
+      'revision'=>5,'version'=>'0.6.0','map'=>data.dig('state','map'),'request_sequence'=>data.dig('state','seq')}
+    RoomReplyTicket.new(response)
+  end
+end
+NordelunaOnline::Transport.singleton_class.prepend(AreaFixtureAsync)
+
+channel=NordelunaOnline::MapChannel
+areas=NordelunaOnline::Areas
+ghosts=NordelunaOnline::Ghosts
+NordelunaOnline.send(:remove_const,:PLAZA_MAP_ID);NordelunaOnline.const_set(:PLAZA_MAP_ID,nil)
+NordelunaOnline.send(:remove_const,:ONLINE_MAP_IDS);NordelunaOnline.const_set(:ONLINE_MAP_IDS,[].freeze)
+rejects('unconfigured map IDs accepted') { channel.connect('PRACA') }
+check($area_calls.none? { |c| c['action']=='map_join' },'unconfigured entry leaked presence')
+NordelunaOnline.send(:remove_const,:PLAZA_MAP_ID);NordelunaOnline.const_set(:PLAZA_MAP_ID,1)
+NordelunaOnline.send(:remove_const,:COLISEUM_MAP_ID);NordelunaOnline.const_set(:COLISEUM_MAP_ID,5)
+NordelunaOnline.send(:remove_const,:MARKET_MAP_ID);NordelunaOnline.const_set(:MARKET_MAP_ID,6)
+NordelunaOnline.send(:remove_const,:ONLINE_MAP_IDS);NordelunaOnline.const_set(:ONLINE_MAP_IDS,[1,5,6].freeze)
+
+# Exercise the real health wrapper, not the fixture's convenience stub: it must
+# preserve the server's area IDs before validation in the journey/channel.
+health=NordelunaOnline::Experience.instance_method(:test_connection).bind(NordelunaOnline).call(false)
+check(health['areas']=={'plaza'=>1,'coliseum'=>5,'market'=>6} && health['version']=='0.6.0',
+      'real connection test dropped server area IDs/version')
+areas.validate_configuration(health)
+
+# No: a real map_leave is issued; neither position nor anchor changes.
+$area_confirm<<false
+check(!channel.connect('PRACA'),'refused entry returned connected')
+check($game_map.map_id==42 && [$game_player.x,$game_player.y,$game_player.direction]==[15,22,8],'refusal moved campaign player')
+check(!channel.active? && !areas.anchor,'refusal retained local session')
+check($area_calls.last['action']=='map_leave','refusal did not release server session')
+identity=Marshal.load($area_files[SaveData::FILE_PATH])[:global_metadata].nordeluna_online_identity
+check(identity==NordelunaOnline::Identity.credentials,'persistent identity differs from registered account')
+
+# Yes: save is verified before transfer; moving between all three keeps anchor.
+$area_confirm<<true
+check(channel.connect('PRACA'),'plaza entry failed')
+original=areas.anchor.dup
+saved=Marshal.load($area_files[SaveData::FILE_PATH])
+check(saved[:position]==[42,15,22,8] && saved[:global_metadata].nordeluna_online_return==original,'original position not persisted before entry')
+check($game_map.map_id==1 && areas.active?,'player not inside plaza')
+check(! $game_player.through,'local player was made non-colliding')
+check(channel.connect('PRACA') && areas.anchor==original,'duplicate entry replaced campaign anchor')
+areas.instance_variable_set(:@busy,true)
+rejects('concurrent teleport not blocked') {channel.connect('PRACA')}
+check(areas.busy? && channel.active? && areas.anchor==original,'concurrent request cleared lock or disconnected original session')
+areas.instance_variable_set(:@busy,false)
+# Presence updates in menus must not expire; idle state sends only a heartbeat.
+channel.update;channel.update
+sent=$area_calls.count { |r| r['action']=='map_update' }
+$area_time+=0.3;channel.update
+check($area_calls.count { |r| r['action']=='map_update' }==sent,'redundant idle movement packet sent')
+$game_temp.in_menu=true
+16.times {$area_time+=1;Graphics.update}
+$game_temp.in_menu=false
+channel.drain
+check(channel.active? && $area_calls.count { |r| r['action']=='map_update' }>sent,'menus stopped presence heartbeats')
+token=channel.instance_variable_get(:@token)
+[5,6].each do |map|
+  $game_temp.player_new_map_id=map;$game_temp.player_new_x=2;$game_temp.player_new_y=3;$game_temp.player_new_direction=4
+  $scene.transfer_player
+  check(areas.anchor==original && channel.instance_variable_get(:@token)==token,'area transition replaced anchor/session')
+end
+
+# Same-tile visuals: pure sprites, interpolation, metadata cache, stale packets,
+# removal and correct nickname positioning. No events or player-through hacks.
+peer={'id'=>'fedcba9876543210','account_id'=>'a'*32,'name'=>'Solar','character'=>'trainer_RED',
+      'x'=>2,'y'=>3,'direction'=>2,'moving'=>true,'frame'=>0,'seq'=>1,'map'=>6,'profile_revision'=>'b'*16}
+ghosts.synchronize([peer]);visual=ghosts.rows[peer['id']];visual.update(true)
+check(visual.label.x==80 && !visual.label.disposed?,'nickname not centered above remote')
+check(! $game_player.through,'remote visuals changed map collision policy')
+ghosts.synchronize([peer.merge('x'=>3,'seq'=>2)]);check(ghosts.rows[peer['id']].equal?(visual),'sprite recreated each packet')
+$area_time+=NordelunaOnline::POSITION_INTERVAL/2;visual.update(true)
+check(visual.label.x==96,'remote motion did not interpolate between tiles')
+ghosts.synchronize([peer.merge('x'=>50,'seq'=>1)]);check(visual.data['x']==3,'out-of-order packet changed ghost')
+check(ghosts.known_metadata[peer['id']]=='b'*16,'metadata revision cache missing')
+ghosts.synchronize([]);check(visual.label.disposed? && visual.label.bitmap.disposed?,'departed player leaked nickname bitmap')
+visual.dispose
+check(ghosts.rows.empty?,'departed player remains visible')
+20.times do
+  many=(1..40).map { |n| peer.merge('id'=>format('%016x',n),'account_id'=>format('%032x',n),'name'=>"Trainer#{n}") }
+  ghosts.synchronize(many)
+  labels=ghosts.rows.values.map(&:label)
+  ghosts.clear
+  check(labels.all? { |label| label.disposed? && label.bitmap.disposed? },'crowded map cycle leaked nickname resources')
+end
+channel.disconnect
+check($game_map.map_id==42 && [$game_player.x,$game_player.y,$game_player.direction]==[15,22,8],'disconnect did not return from market')
+check(!areas.anchor && !channel.active?,'disconnect retained social state')
+
+# Full disk: the old save remains valid and no transport occurs.
+before=$area_files[SaveData::FILE_PATH].dup
+$area_fault=:write;$area_confirm<<true
+rejects('entry continued after failed save') { channel.connect('PRACA') }
+check($game_map.map_id==42,'failed save transported player')
+check($area_files[SaveData::FILE_PATH]==before,'failed write damaged previous campaign save')
+$area_fault=nil
+check(!areas.anchor,'failed initial save left a false pending return')
+
+# Network disappears during transition: restore immediately, retaining direction.
+$area_confirm<<true;$area_fault=:drop_after_transfer
+rejects('drop during transport did not abort entry') { channel.connect('PRACA') }
+check($game_map.map_id==42 && $game_player.direction==8,'transport failure lost campaign position')
+check(!channel.active? && !areas.active?,'transport failure left online active')
+
+# Crash/load of a save made while online: recover before Game.load_map proceeds.
+$area_confirm<<true;channel.connect('PRACA')
+Game.save
+crashed=Marshal.load($area_files[SaveData::FILE_PATH])
+$PokemonGlobal=crashed[:global_metadata]
+$map_factory.setup(5);$game_map=$map_factory.map;$game_player.moveto(20,20)
+Game.load_map
+check($area_map_seen_on_load==42,'load recovery occurred after map initialization')
+check([$game_player.x,$game_player.y,$game_player.direction]==[15,22,8],'load recovery lost campaign coordinates/direction')
+check(!areas.anchor && !channel.active? && ghosts.rows.empty?,'load retained stale online state')
+
+original_server=$PokemonGlobal.nordeluna_online_server
+first_identity=NordelunaOnline::Identity.credentials
+$PokemonGlobal.nordeluna_online_server='https://another.example'
+second_identity=NordelunaOnline::Identity.credentials
+check(first_identity!=second_identity,'credentials were shared across different servers')
+$PokemonGlobal.nordeluna_online_server=original_server
+check(NordelunaOnline::Identity.credentials==first_identity,'switching servers lost original account identity')
+Game.start_new
+check($area_started_new && !channel.managed? && !areas.active?,'new game retained old online session')
+
+'OK: areas accept/refuse, same-session plaza/coliseum/market, verified atomic save, disk failure rollback, transport drop, crash/load recovery, nonblocking ghost sprites, nicknames, interpolation and resource cleanup.'

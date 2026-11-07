@@ -11,6 +11,7 @@ on:
       - game-assets/**
       - scripts/prepare-android-archive.py
       - scripts/prepare-android-game.sh
+      - scripts/prepare-android-movies.py
       - scripts/pack-android-directory.py
       - scripts/tests/**
       - scripts/test-touch-controls.py
@@ -24,7 +25,7 @@ env:
   MKXP_Z_COMMIT: 17a5ec6cb3e8d2de05a82451bc4910f36517d322
   REFERENCE_APK_URL: https://codeberg.org/warmwinter/mkxp-z/releases/download/uranium-android@0.2.0/uranium-0.2.0.apk
   REFERENCE_APK_SHA256: 4a520f7784f1f7e3493c9970da0748a483a0f88400627bcc6a705529c1407653
-  GAME_ARCHIVE_SHA256: 891528b7eb8138f835297558c8e06c9e06b144f7792f1af18680c3f5c16ed3c8
+  GAME_ARCHIVE_SHA256: 0d5354a009a0eaf19c770f7767e6da830b83045649ab02c6b488dab01026e435
 
 jobs:
   build:
@@ -98,6 +99,8 @@ jobs:
           mkdir -p "$APP_MAIN/assets"
           cp android/CrashDiagnostics.java "$APP_MAIN/java/com/mkxpz/launcher/CrashDiagnostics.java"
           cp android/OnlineBridge.java "$APP_MAIN/java/com/mkxpz/launcher/OnlineBridge.java"
+          cp android/MovieMailbox.java "$APP_MAIN/java/com/mkxpz/launcher/MovieMailbox.java"
+          cp android/AndroidMovieBridge.java "$APP_MAIN/java/com/mkxpz/launcher/AndroidMovieBridge.java"
           cp build-android/nordeluna-game.zip "$APP_MAIN/assets/nordeluna-game.zip"
           cp android/nordeluna-display.rb "$APP_MAIN/assets/nordeluna-display.rb"
           cp android/assets/nordeluna-launcher.png \
@@ -119,17 +122,17 @@ jobs:
           test -n "$APK"
           unzip -l "$APK" | grep -F 'assets/nordeluna-game.zip'
           unzip -l "$APK" | grep -F 'lib/arm64-v8a/libmkxp-z.so'
-          cp "$APK" build-android/Nordeluna-Android-arm64-v1.12.apk
-          sha256sum build-android/Nordeluna-Android-arm64-v1.12.apk > build-android/Nordeluna-Android-arm64-v1.12.apk.sha256
-          ls -lh build-android/Nordeluna-Android-arm64-v1.12.apk
+          cp "$APK" build-android/Nordeluna-Android-arm64-v1.13.apk
+          sha256sum build-android/Nordeluna-Android-arm64-v1.13.apk > build-android/Nordeluna-Android-arm64-v1.13.apk.sha256
+          ls -lh build-android/Nordeluna-Android-arm64-v1.13.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Nordeluna-Android-arm64-v1.12
+          name: Nordeluna-Android-arm64-v1.13
           path: |
-            build-android/Nordeluna-Android-arm64-v1.12.apk
-            build-android/Nordeluna-Android-arm64-v1.12.apk.sha256
+            build-android/Nordeluna-Android-arm64-v1.13.apk
+            build-android/Nordeluna-Android-arm64-v1.13.apk.sha256
           compression-level: 0
           retention-days: 14
 

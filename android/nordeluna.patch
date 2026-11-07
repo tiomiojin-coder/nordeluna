@@ -13,8 +13,8 @@ index 036a159..c52b65c 100644
 -        versionCode 1
 -        versionName "0.1.0"
 -        archivesBaseName = "mkxp-z-$versionName"
-+        versionCode 19
-+        versionName "1.12.0"
++        versionCode 20
++        versionName "1.13.0"
 +        archivesBaseName = "Nordeluna-Android-$versionName"
          // Native ABIs are produced by build.sh (see ../build.sh) and placed
          // under src/main/jniLibs/. Everything present there is packaged.
@@ -175,7 +175,7 @@ index be544a2..592f8d2 100644
  import android.util.Log;
  import android.util.TypedValue;
  import java.util.Locale;
-@@ -35,18 +51,32 @@ import java.util.ArrayList;
+@@ -35,18 +51,33 @@ import java.util.ArrayList;
  import java.util.List;
  import java.io.File;
  import java.io.FileInputStream;
@@ -205,10 +205,11 @@ index be544a2..592f8d2 100644
 +import com.mkxpz.launcher.ErrorReport;
 +import com.mkxpz.launcher.CrashDiagnostics;
 +import com.mkxpz.launcher.OnlineBridge;
++import com.mkxpz.launcher.AndroidMovieBridge;
  
  public class MainActivity extends SDLActivity
  {
-@@ -65,10 +95,24 @@ public class MainActivity extends SDLActivity
+@@ -65,10 +96,24 @@ public class MainActivity extends SDLActivity
  
      private static final String PREFS_NAME = "mkxpz_prefs";
      private static final String PREFS_GAME_PATH = "game_path";
@@ -233,7 +234,7 @@ index be544a2..592f8d2 100644
  
      protected boolean mStarted = false;
  
-@@ -87,19 +131,78 @@ public class MainActivity extends SDLActivity
+@@ -87,19 +132,89 @@ public class MainActivity extends SDLActivity
      // In-screen gamepad
      private final Gamepad mGamepad = new Gamepad();
      private boolean mGamepadInvisible = false;
@@ -254,6 +255,7 @@ index be544a2..592f8d2 100644
 +    private boolean mWhatsNewScheduled = false;
 +    private boolean mCrashNoticeScheduled = false;
 +    private OnlineBridge mOnlineBridge;
++    private AndroidMovieBridge mMovieBridge;
 +
 +    private final AudioManager.OnAudioFocusChangeListener mAudioFocusListener = focusChange -> {
 +        if (mMainHandler == null)
@@ -298,6 +300,16 @@ index be544a2..592f8d2 100644
 +                Log.e(TAG, "Online transport unavailable", error);
 +            }
 +        }
++        if (mMovieBridge == null) {
++            try {
++                mMovieBridge = new AndroidMovieBridge(this, new File(GAME_PATH));
++                mMovieBridge.setMuted(getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
++                    .getBoolean(PREFS_AUDIO_MUTED, false));
++                mMovieBridge.setResumed(mActivityResumed);
++            } catch (IOException error) {
++                Log.e(TAG, "Android movie player unavailable", error);
++            }
++        }
          if (!mStarted) {
 +            int displayMode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(
 +                PREFS_DISPLAY_MODE, SideMenu.DISPLAY_KEEP_ASPECT);
@@ -314,7 +326,7 @@ index be544a2..592f8d2 100644
  
          // Run (resume) native SDL thread
          if (mHasMultiWindow) {
-@@ -153,6 +256,9 @@ public class MainActivity extends SDLActivity
+@@ -153,6 +268,9 @@ public class MainActivity extends SDLActivity
              if (resultCode == RESULT_OK && data != null && data.getData() != null) {
                  exportSaves(data.getData());
              }
@@ -324,7 +336,7 @@ index be544a2..592f8d2 100644
          }
      }
  
-@@ -176,7 +282,28 @@ public class MainActivity extends SDLActivity
+@@ -176,7 +294,28 @@ public class MainActivity extends SDLActivity
          GAME_PATH_DEFAULT = new File(gameRootBase, "mkxp-z").getAbsolutePath();
          GAME_PATH = GAME_PATH_DEFAULT;
  
@@ -353,7 +365,7 @@ index be544a2..592f8d2 100644
  
          mStorageManager = (StorageManager) getSystemService(STORAGE_SERVICE);
          mVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
-@@ -196,9 +323,12 @@ public class MainActivity extends SDLActivity
+@@ -196,9 +335,12 @@ public class MainActivity extends SDLActivity
          }
  
          // Setup in-screen gamepad
@@ -367,7 +379,7 @@ index be544a2..592f8d2 100644
          mGamepad.setOnKeyDownListener(SDLActivity::onNativeKeyDown);
          mGamepad.setOnKeyUpListener(SDLActivity::onNativeKeyUp);
  
-@@ -206,7 +336,7 @@ public class MainActivity extends SDLActivity
+@@ -206,7 +348,7 @@ public class MainActivity extends SDLActivity
              mGamepad.attachTo(this, mLayout);
          }
  
@@ -376,7 +388,7 @@ index be544a2..592f8d2 100644
          tvFps = new TextView(this);
          tvFps.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
          tvFps.setTextColor(Color.WHITE);
-@@ -220,14 +350,16 @@ public class MainActivity extends SDLActivity
+@@ -220,14 +362,16 @@ public class MainActivity extends SDLActivity
          tvFps.setPadding(dpPx(10), dpPx(4), dpPx(10), dpPx(4));
          tvFps.setVisibility(View.GONE);
  
@@ -396,7 +408,7 @@ index be544a2..592f8d2 100644
          String savedGamePath = prefs.getString(PREFS_GAME_PATH, null);
          if (savedGamePath != null && new File(savedGamePath).isDirectory()) {
              GAME_PATH = savedGamePath;
-@@ -240,13 +372,30 @@ public class MainActivity extends SDLActivity
+@@ -240,13 +384,30 @@ public class MainActivity extends SDLActivity
          mSideMenu = new SideMenu(this, mLayout);
          mSideMenu.setGamePath(GAME_PATH);
          mSideMenu.setFpsOverlayEnabled(fpsOverlayEnabled);
@@ -430,7 +442,7 @@ index be544a2..592f8d2 100644
      }
  
      @Override
-@@ -261,16 +410,16 @@ public class MainActivity extends SDLActivity
+@@ -261,16 +422,16 @@ public class MainActivity extends SDLActivity
  
                  // Try to mount main OBB file
                  mStorageManager.mountObb(OBB_MAIN_FILENAME, null, obbListener);
@@ -452,7 +464,7 @@ index be544a2..592f8d2 100644
              }
          } else {
              // onStart: Resume SDL thread
-@@ -278,9 +427,37 @@ public class MainActivity extends SDLActivity
+@@ -278,9 +439,43 @@ public class MainActivity extends SDLActivity
          }
      }
  
@@ -462,6 +474,10 @@ index be544a2..592f8d2 100644
 +        super.onResume();
 +        mActivityResumed = true;
 +        if (mOnlineBridge != null) mOnlineBridge.setResumed(true);
++        if (mMovieBridge != null) {
++            mMovieBridge.setAudioFocusPaused(false);
++            mMovieBridge.setResumed(true);
++        }
 +        requestGameAudioFocus();
 +        mPausedForAudioFocus = false;
 +        SDLAudioManager.setPlaybackPaused(false);
@@ -475,6 +491,7 @@ index be544a2..592f8d2 100644
 +    {
 +        mActivityResumed = false;
 +        if (mOnlineBridge != null) mOnlineBridge.setResumed(false);
++        if (mMovieBridge != null) mMovieBridge.setResumed(false);
 +        SDLAudioManager.setPlaybackPaused(true);
 +        abandonGameAudioFocus();
 +        super.onPause();
@@ -484,13 +501,14 @@ index be544a2..592f8d2 100644
      protected void onDestroy()
      {
 +        if (mOnlineBridge != null) mOnlineBridge.close();
++        if (mMovieBridge != null) mMovieBridge.close();
 +        if (mInputManager != null)
 +            mInputManager.unregisterInputDeviceListener(mInputDeviceListener);
 +        abandonGameAudioFocus();
          super.onDestroy();
  
          // HACK: Exiting the JVM (process) since Ruby does not like when we
-@@ -289,22 +466,139 @@ public class MainActivity extends SDLActivity
+@@ -289,22 +484,141 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
@@ -522,12 +540,14 @@ index be544a2..592f8d2 100644
 +            SDLAudioManager.setPlaybackPaused(true);
 +            if (mStarted && !mPausedForAudioFocus) {
 +                mPausedForAudioFocus = true;
++                if (mMovieBridge != null) mMovieBridge.setAudioFocusPaused(true);
 +                pauseNativeThread();
 +            }
 +        } else if (focusChange == AudioManager.AUDIOFOCUS_GAIN) {
 +            SDLAudioManager.setPlaybackPaused(false);
 +            if (mStarted && mActivityResumed && mPausedForAudioFocus) {
 +                mPausedForAudioFocus = false;
++                if (mMovieBridge != null) mMovieBridge.setAudioFocusPaused(false);
 +                resumeNativeThread();
 +            }
 +        }
@@ -643,7 +663,7 @@ index be544a2..592f8d2 100644
  
          if (mGamepad.processGamepadEvent(evt))
              return true;
-@@ -315,11 +609,9 @@ public class MainActivity extends SDLActivity
+@@ -315,11 +629,9 @@ public class MainActivity extends SDLActivity
      @Override
      public boolean dispatchTouchEvent(MotionEvent evt)
      {
@@ -657,7 +677,7 @@ index be544a2..592f8d2 100644
              mGamepad.showView();
              mGamepadInvisible = false;
          }
-@@ -330,12 +622,20 @@ public class MainActivity extends SDLActivity
+@@ -330,12 +642,20 @@ public class MainActivity extends SDLActivity
      @Override
      public boolean onGenericMotionEvent(MotionEvent evt)
      {
@@ -678,7 +698,7 @@ index be544a2..592f8d2 100644
      /**
       * This method is for arguments for launching native mkxp-z.
       *
-@@ -392,6 +692,611 @@ public class MainActivity extends SDLActivity
+@@ -392,6 +712,612 @@ public class MainActivity extends SDLActivity
              tvFps.setVisibility(View.GONE);
      }
  
@@ -689,6 +709,7 @@ index be544a2..592f8d2 100644
 +            .putBoolean(PREFS_AUDIO_MUTED, muted)
 +            .apply();
 +        SDLAudioManager.setMuted(muted);
++        if (mMovieBridge != null) mMovieBridge.setMuted(muted);
 +    }
 +
 +    private void setExternalAudioMixEnabled(boolean enabled)
@@ -1290,7 +1311,7 @@ index be544a2..592f8d2 100644
      /**
       * This static method is used in native mkxp-z. (see systemImpl.cpp)
       * This method returns a string of current device locale tag. (e.g. "en_US")
-@@ -488,6 +1393,7 @@ public class MainActivity extends SDLActivity
+@@ -488,6 +1414,7 @@ public class MainActivity extends SDLActivity
          intent.setType("*/*");
          // .rxdata/.rvdata files have no standard MIME type.
          intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
@@ -1298,7 +1319,7 @@ index be544a2..592f8d2 100644
              "application/octet-stream",
              "application/x-rpgmaker"
          });
-@@ -496,15 +1402,26 @@ public class MainActivity extends SDLActivity
+@@ -496,15 +1423,26 @@ public class MainActivity extends SDLActivity
      }
  
      /**
@@ -1328,7 +1349,7 @@ index be544a2..592f8d2 100644
      /**
       * The directories where the game may keep its save files. RPG Maker's
       * {@code save_data} writes into the game folder, but games that use
-@@ -549,64 +1466,104 @@ public class MainActivity extends SDLActivity
+@@ -549,64 +1487,104 @@ public class MainActivity extends SDLActivity
          final File[] roots = saveRoots();
  
          new Thread(() -> {
@@ -1459,7 +1480,7 @@ index be544a2..592f8d2 100644
      }
  
      /**
-@@ -681,6 +1638,116 @@ public class MainActivity extends SDLActivity
+@@ -681,6 +1659,116 @@ public class MainActivity extends SDLActivity
          }).start();
      }
  
@@ -1576,7 +1597,7 @@ index be544a2..592f8d2 100644
      /**
       * Searches for the directory that actually contains a game, starting from
       * {@code root} and descending into its subdirectories.
-@@ -810,33 +1877,4 @@ public class MainActivity extends SDLActivity
+@@ -810,33 +1898,4 @@ public class MainActivity extends SDLActivity
          System.exit(0);
      }
  
