@@ -96,6 +96,7 @@ jobs:
           set -euo pipefail
           APP_MAIN=build-android/mkxp-z/android/app/src/main
           mkdir -p "$APP_MAIN/assets"
+          cp android/CrashDiagnostics.java "$APP_MAIN/java/com/mkxpz/launcher/CrashDiagnostics.java"
           cp build-android/nordeluna-game.zip "$APP_MAIN/assets/nordeluna-game.zip"
           cp android/nordeluna-display.rb "$APP_MAIN/assets/nordeluna-display.rb"
           cp android/assets/nordeluna-launcher.png \
@@ -117,17 +118,17 @@ jobs:
           test -n "$APK"
           unzip -l "$APK" | grep -F 'assets/nordeluna-game.zip'
           unzip -l "$APK" | grep -F 'lib/arm64-v8a/libmkxp-z.so'
-          cp "$APK" build-android/Nordeluna-Android-arm64-v1.9.apk
-          sha256sum build-android/Nordeluna-Android-arm64-v1.9.apk > build-android/Nordeluna-Android-arm64-v1.9.apk.sha256
-          ls -lh build-android/Nordeluna-Android-arm64-v1.9.apk
+          cp "$APK" build-android/Nordeluna-Android-arm64-v1.10.apk
+          sha256sum build-android/Nordeluna-Android-arm64-v1.10.apk > build-android/Nordeluna-Android-arm64-v1.10.apk.sha256
+          ls -lh build-android/Nordeluna-Android-arm64-v1.10.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Nordeluna-Android-arm64-v1.9
+          name: Nordeluna-Android-arm64-v1.10
           path: |
-            build-android/Nordeluna-Android-arm64-v1.9.apk
-            build-android/Nordeluna-Android-arm64-v1.9.apk.sha256
+            build-android/Nordeluna-Android-arm64-v1.10.apk
+            build-android/Nordeluna-Android-arm64-v1.10.apk.sha256
           compression-level: 0
           retention-days: 14
 

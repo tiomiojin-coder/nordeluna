@@ -1,0 +1,73 @@
+# The screenshot is the guest's canonical view: host=Catitux, guest=Aipom.
+# Exercise both players' commands and check that campaign objects never change.
+class AipomCatituxScene < HeadlessLinkScene
+  attr_reader :controlled_species
+  def pbCommandMenu(idx, first)
+    @controlled_species ||= []
+    @controlled_species << @battle.battlers[idx].species
+    return 3 if @battle.turnCount >= 4 && idx == 0
+    0
+  end
+end
+c = NordelunaOnline::PokemonCodec
+trainer_type = GameData::TrainerType.keys.first
+campaign = [:CATITUX, :AIPOM].map do |species|
+  pokemon = Pokemon.new(species, 50, nil, false, false)
+  pokemon.moves = [Pokemon::Move.new(:TACKLE)]
+  pokemon.heal
+  pokemon
+end
+packets = campaign.map { |pokemon| c.encode(pokemon) }
+snapshots = campaign.map { |pokemon| Marshal.dump(pokemon) }
+hub = MemoryHub.new
+scenes = []
+case_battles = 2.times.map do |side|
+  parties = packets.map { |packet| [c.decode(packet)] }
+  trainers = [NPCTrainer.new('Catitux owner', trainer_type), NPCTrainer.new('Aipom owner', trainer_type)]
+  scenes << AipomCatituxScene.new
+  NordelunaOnline::LinkBattle.new(scenes.last, parties, trainers, MemoryLink.new(side, hub), 778899)
+end
+results = case_battles.map { |battle| Thread.new { battle.pbStartBattle } }.map(&:value)
+$nordeluna_case_battles = case_battles
+check(results[0] == results[1], 'Aipom/Catitux battle results diverged')
+check(scenes[0].controlled_species.uniq == [:CATITUX], 'host commanded guest Pokemon')
+check(scenes[1].controlled_species.uniq == [:AIPOM], 'guest commanded host Pokemon')
+campaign.each_with_index do |pokemon, index|
+  check(Marshal.dump(pokemon) == snapshots[index], 'PvP changed campaign Pokemon')
+end
+
+# Save is required at escrow AND immediately after the completed delivery.
+module Game
+  class << self
+    alias online_save_before_audit save
+    attr_accessor :online_save_audit
+    def save
+      self.online_save_audit ||= []
+      online_save_audit << {
+        pending: !!NordelunaOnline.pending_trade,
+        party: $player.party.map(&:species),
+        success: save_success,
+        receipts: NordelunaOnline.respond_to?(:receipts) ? NordelunaOnline.receipts.length : 0
+      }
+      online_save_before_audit
+    end
+  end
+end
+$PokemonGlobal = PokemonGlobalMetadata.new
+$player.party = [campaign[1], Pokemon.new(:EEVEE, 15, nil, true, false)]
+session = NordelunaOnline::Session.new('https://example.org', {'code'=>'ABCDEFGH','token'=>'test','side'=>0})
+Game.online_save_audit = []
+Game.save_success = true
+NordelunaOnline.reserve_trade(session, 0, c.encode(campaign[1]), c.encode(campaign[0]), 'Catitux owner')
+check(Game.online_save_audit.length == 1 && Game.online_save_audit[0][:pending], 'escrow was not saved immediately')
+check(Game.online_save_audit[0][:party] == [:EEVEE], 'offered Pokemon still movable after reserve')
+Game.save_success = false
+rejects('trade claimed complete despite failed save') { NordelunaOnline.deliver_trade(true) }
+check(NordelunaOnline.pending_trade && $player.party.map(&:species) == [:EEVEE], 'failed save lost recovery ticket')
+Game.save_success = true
+NordelunaOnline.deliver_trade(true)
+saved = Game.online_save_audit.last
+check(Game.online_save_audit.length == 3, 'unexpected number of save attempts')
+check(saved[:success] && !saved[:pending] && saved[:party] == [:CATITUX, :EEVEE], 'completed trade was not immediately saved')
+check(!NordelunaOnline.pending_trade && $player.party[0].personalID == campaign[0].personalID, 'trade delivery changed identity')
+'OK: Aipom/Catitux commands belong to the correct players; campaign unchanged; immediate escrow/final save and failed-save recovery confirmed. Visual Android crash still requires device log.'

@@ -1,0 +1,224 @@
+canonical = $nordeluna_case_battles[1]
+state_before_presentation = canonical.online_state
+view = NordelunaOnline::LocalBattleView.new(canonical, 1)
+check(view.battlers[0].species == :AIPOM, 'guest bottom battler is not Aipom')
+check(view.battlers[1].species == :CATITUX, 'guest opponent is not Catitux')
+check(view.battlers[0].index == 0 && view.battlers[1].index == 1, 'visual indices incorrect')
+check(view.battlers[0].hp == canonical.battlers[1].hp, 'guest HP belongs to opponent')
+check(view.pbParty(0)[0].species == :AIPOM && view.pbParty(1)[0].species == :CATITUX, 'party screen reversed')
+check(!view.opposes?(0) && view.opposes?(1), 'view ownership incorrect')
+check(canonical.battlers[0].species == :CATITUX && canonical.battlers[1].species == :AIPOM,
+      'presentation changed canonical battle state')
+
+class OnlineWindowFixture
+  attr_accessor :battler, :shiftMode, :index, :mode
+  def setIndexAndMode(i, m); @index = i; @mode = m; end
+end
+class PokemonCanvasFixture
+  attr_accessor :visible
+  attr_reader :pokemon, :back
+  def setPokemonBitmap(pokemon, back = nil); @pokemon = pokemon; @back = back; end
+end
+class Battle::Scene::OnlineViewFixture
+  attr_reader :selected_index, :command_text, :last_sendouts, :last_hp_event
+  def initialize
+    @lastMove = [0, 0]
+    @sprites = {'fightWindow' => OnlineWindowFixture.new}
+    2.times do |i|
+      @sprites["pokemon_#{i}"] = PokemonCanvasFixture.new
+      @sprites["shadow_#{i}"] = PokemonCanvasFixture.new
+    end
+  end
+  def pbStartBattle(battle); @battle = battle; end
+  def pbCommandMenuEx(index, text, mode); @selected_index = index; @command_text = text; 0; end
+  def pbChooseTarget(*args); 1; end
+  def pbShowWindow(*args); end
+  def pbSelectBattler(index, *args); @selected_index = index; end
+  def pbUpdate(*args); end
+  def pbPlayDecisionSE; end
+  def pbPlayCursorSE; end
+  def pbPlayCancelSE; end
+  def pbSendOutBattlers(sendouts, *args); @last_sendouts = sendouts; end
+  def pbHPChanged(battler, old_hp, *args); @last_hp_event = [battler.index, battler.species, old_hp, battler.hp]; end
+  def sprites; @sprites; end
+end
+Battle::Scene.const_set(:FIGHT_BOX, 2) unless Battle::Scene.const_defined?(:FIGHT_BOX)
+%i[LEFT RIGHT UP DOWN USE ACTION SPECIAL].each_with_index do |key, i|
+  Input.const_set(key, 20+i) unless Input.const_defined?(key)
+end
+module Input
+  class << self
+    alias online_original_trigger trigger?
+    def trigger?(key); key == Input::USE; end
+  end
+end
+scene = Battle::Scene::OnlineViewFixture.new
+adapter = NordelunaOnline::LocalScene.new(scene, 1)
+adapter.pbStartBattle(canonical)
+adapter.pbCommandMenu(1, true)
+check(scene.selected_index == 0 && scene.command_text[0].include?('Aipom'), 'real command menu controls wrong Pokemon')
+adapter.pbFightMenu(1, false) { |move| move == 0 }
+check(scene.sprites['fightWindow'].battler.species == :AIPOM, 'real move menu controls wrong Pokemon')
+adapter.pbChangePokemon(1, canonical.battlers[1].pokemon)
+adapter.pbChangePokemon(0, canonical.battlers[0].pokemon)
+check(scene.sprites['pokemon_0'].pokemon.species == :AIPOM && scene.sprites['pokemon_0'].back,
+      'guest own Pokemon is not a back sprite at local index 0')
+check(scene.sprites['pokemon_1'].pokemon.species == :CATITUX && !scene.sprites['pokemon_1'].back,
+      'guest opponent is not a front sprite at local index 1')
+check(adapter.sprites['pokemon_1'].equal?(scene.sprites['pokemon_0']), 'Gen9 canonical sprite lookup not converted')
+adapter.sprites['pokemon_1'].visible = false
+check(scene.sprites['pokemon_0'].visible == false, 'Gen9 ability affected the wrong sprite')
+check(adapter.pbChooseTarget(1, nil) == 0, 'visual target not converted to canonical opponent')
+adapter.pbSendOutBattlers([[0, canonical.battlers[0].pokemon], [1, canonical.battlers[1].pokemon]])
+check(scene.last_sendouts.map(&:first) == [1,0], 'sendout animation indices not mapped')
+adapter.pbHPChanged(canonical.battlers[1], 100)
+check(scene.last_hp_event[0,2] == [0,:AIPOM], 'HP animation targets opponent box')
+class AnimatedBitmap
+  attr_reader :filename
+  def initialize(filename); @filename = filename; end
+  def dispose; end
+end
+module Graphics
+  def self.width; 512; end
+  def self.height; 384; end
+end
+$PokemonSystem.define_singleton_method(:battle_ui) { 'Default' }
+boxes = view.battlers.map do |battler|
+  box = Battle::Scene::PokemonDataBox.allocate
+  box.instance_variable_set(:@battler, battler)
+  box.instance_variable_set(:@show_hp_numbers, false)
+  box.initializeDataBoxGraphic(1)
+  box
+end
+check(boxes[0].instance_variable_get(:@spriteY) > boxes[1].instance_variable_get(:@spriteY), 'actual CBUI puts guest above opponent')
+check(boxes[0].instance_variable_get(:@show_hp_numbers), 'guest numerical HP not shown')
+check(!boxes[1].instance_variable_get(:@show_hp_numbers), 'opponent numerical HP leaked')
+check(!boxes[0].instance_variable_get(:@databoxBitmap).filename.end_with?('_foe'), 'wrong CBUI texture for local player')
+host_scene = Battle::Scene::OnlineViewFixture.new
+host_adapter = NordelunaOnline::LocalScene.new(host_scene, 0)
+host_adapter.pbStartBattle($nordeluna_case_battles[0])
+host_adapter.pbCommandMenu(0, true)
+check(host_scene.selected_index == 0 && host_scene.command_text[0].include?('Catitux'), 'host perspective changed incorrectly')
+check(canonical.online_state == state_before_presentation, 'presentation consumed battle RNG or changed state')
+module Input
+  class << self; alias trigger? online_original_trigger; end
+end
+
+record = NordelunaOnline.receipts.last
+check(record && record['save_confirmed'] && record['received']['species'] == 'Catitux', 'missing saved trade receipt')
+check(Game.online_save_audit.last[:receipts] > 0, 'receipt was not in the actual save transaction')
+history_before = Marshal.dump(NordelunaOnline.receipts)
+outgoing = NordelunaOnline::PokemonCodec.encode($player.party[0])
+incoming = NordelunaOnline::PokemonCodec.encode($player.party[1])
+session = NordelunaOnline::Session.new('https://example.org', {'code'=>'BCDEFGHJ','token'=>'test','side'=>0})
+Game.save_success = true
+NordelunaOnline.reserve_trade(session, 0, outgoing, incoming, 'Sol')
+Game.save_success = false
+rejects('failed save accepted with receipt') { NordelunaOnline.deliver_trade(true) }
+check(Marshal.dump(NordelunaOnline.receipts) == history_before && NordelunaOnline.pending_trade,
+      'failed save kept a misleading receipt or lost recovery')
+Game.save_success = true
+NordelunaOnline.deliver_trade(false)
+check(!NordelunaOnline.pending_trade && NordelunaOnline.receipts.last['status'] == 'cancelled', 'recovery not recorded')
+roundtrip_metadata = Marshal.load(Marshal.dump($PokemonGlobal))
+check(roundtrip_metadata.nordeluna_online_receipts == NordelunaOnline.receipts, 'receipts lost when saved/loaded')
+
+# Render both trade cards with display doubles; never reserve/save on preview.
+$preview_resources = []
+$preview_text = []
+class Viewport
+  attr_accessor :z
+  def initialize(*args); $preview_resources << self; end
+  def dispose; @disposed = true; end
+  def disposed?; !!@disposed; end
+end
+class PreviewBitmap
+  attr_reader :font
+  def initialize; @font = Struct.new(:size, :color).new; end
+  def fill_rect(*args); end
+  def draw_text(x, y, width, height, text, *args); $preview_text << text; end
+end
+class BitmapSprite
+  attr_reader :bitmap
+  def initialize(*args); @bitmap = PreviewBitmap.new; $preview_resources << self; end
+  def update; end
+  def dispose; @disposed = true; end
+  def disposed?; !!@disposed; end
+end
+class PokemonIconSprite < BitmapSprite
+  attr_accessor :x, :y
+end
+def pbUpdateSpriteHash(sprites); sprites.each_value(&:update); end
+def pbDisposeSpriteHash(sprites); sprites.each_value(&:dispose); end
+$confirmation_calls = 0
+def pbConfirmMessage(text)
+  $confirmation_calls += 1
+  yield if block_given?
+  true
+end
+save_attempts = Game.online_save_audit.length
+preview_outgoing = Pokemon.new(:AIPOM, 50, nil, true, false)
+preview_incoming = Pokemon.new(:CATITUX, 50, nil, true, false)
+check(NordelunaOnline::TradePreview.confirm(preview_outgoing, preview_incoming, 'Sol'), 'trade preview confirmation failed')
+check($preview_text.include?('VOCE ENVIA') && $preview_text.include?('VOCE RECEBE'), 'both trade cards not displayed')
+check($preview_text.any? { |s| s.include?('Aipom') } && $preview_text.any? { |s| s.include?('Catitux') }, 'preview species missing')
+check($preview_text.any? { |s| s.start_with?('Shiny:') } && $preview_text.any? { |s| s.start_with?('OT:') }, 'preview metadata missing')
+check($preview_resources.all?(&:disposed?), 'trade preview leaked graphics resources')
+check(Game.online_save_audit.length == save_attempts && !NordelunaOnline.pending_trade, 'preview reserved a Pokemon before confirmation')
+
+# Offer a saved pending trade once, only after the map is safe to show a dialog.
+class Scene_Map; end
+temp_before = $game_temp
+$scene = Scene_Map.new
+$game_temp = Struct.new(:in_battle, :in_menu, :message_window_showing).new(false, true, false)
+$game_map = Struct.new(:interpreter).new(Object.new)
+$game_map.interpreter.define_singleton_method(:running?) { false }
+module NordelunaOnline
+  class << self
+    alias recovery_before_notice_fixture recover_trade
+    def recover_trade
+      @recovery_fixture_calls = (@recovery_fixture_calls || 0) + 1
+      $PokemonGlobal.nordeluna_online_pending = nil
+    end
+  end
+end
+notice_ticket = {'url'=>'https://example.org','code'=>'NOTICE23','side'=>0}
+$PokemonGlobal.nordeluna_online_pending = notice_ticket
+calls_before = $confirmation_calls
+NordelunaOnline.offer_pending_recovery
+check($confirmation_calls == calls_before, 'recovery interrupted an open menu')
+$game_temp.in_menu = false
+NordelunaOnline.offer_pending_recovery
+check($confirmation_calls == calls_before + 1 && !NordelunaOnline.pending_trade, 'pending recovery not offered on map')
+$PokemonGlobal.nordeluna_online_pending = notice_ticket
+NordelunaOnline.offer_pending_recovery
+check($confirmation_calls == calls_before + 1, 'same recovery notice repeatedly opened')
+$PokemonGlobal.nordeluna_online_pending = nil
+$game_temp = temp_before
+module NordelunaOnline
+  class << self; alias recover_trade recovery_before_notice_fixture; end
+end
+
+module HTTPLite
+  def self.post_body(*args); {status: 200, body: '{"ok":true,"protocol":1,"revision":2}'}; end
+end
+result = NordelunaOnline.test_connection(false)
+check(result['latency_ms'].is_a?(Integer) && result['latency_ms'] >= 0 && result['build'] == NordelunaOnline::BUILD,
+      'connection test missing latency/build')
+module HTTPLite
+  def self.post_body(*args); raise 'simulated disconnection'; end
+end
+begin
+  NordelunaOnline.request('https://example.org', 'action'=>'health')
+  raise 'disconnect accepted as success'
+rescue NordelunaOnline::ConnectionLost
+end
+module HTTPLite
+  def self.post_body(*args); {status: 200, body: '{"ok":true,"protocol":2,"revision":2}'}; end
+end
+begin
+  NordelunaOnline.test_connection(false)
+  raise 'incompatible server accepted'
+rescue NordelunaOnline::VersionMismatch
+end
+'OK: real command/move menus, front/back sprites and CBUI HP boxes use local perspective; targeting/animations remain canonical; atomic receipts, connection/version checks and disconnect classification passed.'

@@ -30,9 +30,12 @@ prefixes = ["000_", "001_", "015_", "035_", "100_", "103_", "104_", "105_", "106
 for prefix in prefixes:
     p = next(engine.glob(prefix + "*"))
     chunks.append((p.name, p.read_text(encoding="utf-8")))
+metrics_script = next(engine.glob("131_*"))
+chunks.append(("actual species metrics", metrics_script.read_text(encoding="utf-8")))
 data_packets = {f"Data/{p.name}": p.read_bytes().hex() for p in (GAME / "Data").glob("*.dat")}
 chunks.append(("packets", "DATA_PACKETS = {" + ",".join(json.dumps(k) + " => " + json.dumps(v) for k, v in data_packets.items()) + "}"))
 chunks.append(("data", '[GameData::Species, GameData::Move, GameData::Ability, GameData::Item, GameData::Type, GameData::TrainerType, GameData::Ribbon].each(&:load)'))
+chunks.append(("metrics data", 'GameData::SpeciesMetrics.load; "metrics ready"'))
 chunks.append(("trainer", 'Object.send(:remove_const, :NPCTrainer)\n' + next(engine.glob("286_*")).read_text(encoding="utf-8")))
 for num in list(range(147, 185)) + [195] + list(range(198, 209)) + list(range(222, 228)) + [229, 230, 231, 237, 263]:
     if num in (158, 159, 170, 171):
@@ -56,6 +59,23 @@ mui_source = (PLUGINS / "[MUI_001] Enhanced Pokemon UI/[002] Legacy Data.rb").re
 mui_start = mui_source.index("class Pokemon", mui_source.index("# Pokemon data."))
 chunks.append(("real MUI Pokemon data", mui_source[mui_start:]))
 chunks.append(("MUI online regressions", (Path(__file__).resolve().parent / "fixtures/online-mui.fixture").read_text(encoding="utf-8")))
+chunks.append(("Aipom/Catitux and immediate-save regression", (Path(__file__).resolve().parent / "fixtures/online-aipom-catitux.fixture").read_text(encoding="utf-8")))
+# Exercise the original installed UI methods with lightweight display doubles.
+import re
+scene_methods = []
+for filename, signatures in (("187_Battle_Scene.rb", ("pbChangePokemon",)),
+                              ("189_Scene_ChooseCommands.rb", ("pbCommandMenu", "pbFightMenu"))):
+    source = (engine / filename).read_text(encoding="utf-8")
+    for signature in signatures:
+        match = re.search(r"(?ms)^  def " + signature + r"\(.*?(?=^  def )", source)
+        if not match:
+            raise RuntimeError("Missing actual scene method: " + signature)
+        scene_methods.append(match[0])
+chunks.append(("actual scene methods", "class Battle::Scene::OnlineViewFixture < Battle::Scene\n" + "\n".join(scene_methods) + "\nend"))
+cbui = (PLUGINS / "Customizable Battle UI/001_Script.rb").read_text(encoding="utf-8")
+databox = cbui[cbui.index("class Battle::Scene::PokemonDataBox < Sprite"):cbui.index("class Battle::Scene::AbilitySplashBar < Sprite")]
+chunks.append(("actual CBUI data box", "class Sprite; end unless defined?(Sprite)\n" + databox))
+chunks.append(("local perspective and online UX", (Path(__file__).resolve().parent / "fixtures/online-experience.fixture").read_text(encoding="utf-8")))
 state = ctypes.c_int()
 # ctypes embeds Ruby without a native Ruby main stack. Disable conservative GC
 # in this short-lived test process, as its stack scanner cannot scan Python's.
