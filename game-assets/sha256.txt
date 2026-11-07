@@ -1,1 +1,1 @@
-bed579e1a448c10f3d31bb7def5c41f3de6b436ef407b1666ebccfd1efb4a835  game-assets.zip
+96c44ae711a0179d220df810e84ddeabb046474e3b78c75fcd6f8f067a91b5d0  game-assets.zip
