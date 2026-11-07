@@ -50,9 +50,9 @@ module NordelunaOnline
       @x = @from_x + (@data["x"] - @from_x) * factor
       @y = @from_y + (@data["y"] - @from_y) * factor
       close = (@x - $game_player.x).abs + (@y - $game_player.y).abs <= REMOTE_DISTANCE
-      show = visible && close && now - @seen_at < 6
+      show = !!(visible && close && now - @seen_at < 6)
       @sprite.visible = show
-      @label.visible = show && SHOW_NICKNAMES
+      @label.visible = !!(show && SHOW_NICKNAMES)
       return unless show && @animated
       @animated.update
       @sprite.bitmap = @animated.bitmap
@@ -151,7 +151,7 @@ module NordelunaOnline
         end
         @local_label.x = $game_player.screen_x
         @local_label.y = $game_player.screen_y - ($game_player.sprite_size&.last || 32) - NICK_OFFSET - 24
-        @local_label.visible = SHOW_NICKNAMES && MapChannel.safe_map?
+        @local_label.visible = !!(SHOW_NICKNAMES && MapChannel.safe_map?)
       end
 
       def clear

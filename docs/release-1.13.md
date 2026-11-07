@@ -9,6 +9,8 @@ mantém o identificador e a chave de assinatura usados nas builds anteriores.
 - Corrige o falso desacordo dos IDs: o teste de conexão preserva a configuração
   recebida do servidor. No PC, o helper Windows v2 elimina a regravação contínua
   do marcador que causava EACCES e tolera bloqueios transitórios de leitura.
+- Corrige `Expected bool` ao entrar no mapa: o predicado de visibilidade devolve
+  um booleano e a exibição dos nicks respeita o tipo exigido pelo motor nativo.
 - MP4 no Android usa player nativo, com ajuste de proporção, pausa, retorno e
   limpeza. A preparação do APK converte os vídeos para um perfil compatível com
   decodificadores de celulares; os originais do PC são preservados.
@@ -18,7 +20,7 @@ mantém o identificador e a chave de assinatura usados nas builds anteriores.
 O relay publicado é 0.6.0/revisão 5; apenas a Praça tem um mapa configurado.
 Coliseu e Mercado continuam desativados até que seus mapas sejam informados.
 
-Validação: 54 testes Python, regressões do online no Ruby real do jogo, 213
+Validação: testes Python, regressões do online no Ruby real do jogo, 213
 verificações dos plugins, 22 de vídeo Ruby, 34 do estado/layout do player e
 aplicação do patch sobre o motor fixado. Não substitui a verificação em aparelhos
 reais nem uma partida entre dois jogadores no APK final.

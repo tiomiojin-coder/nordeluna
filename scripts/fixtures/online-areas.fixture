@@ -106,7 +106,21 @@ end
 # removal and correct nickname positioning. No events or player-through hacks.
 peer={'id'=>'fedcba9876543210','account_id'=>'a'*32,'name'=>'Solar','character'=>'trainer_RED',
       'x'=>2,'y'=>3,'direction'=>2,'moving'=>true,'frame'=>0,'seq'=>1,'map'=>6,'profile_revision'=>'b'*16}
+check(channel.safe_map?.equal?(true),'map visibility predicate returned the player object instead of true')
+ghosts.update
+check(ghosts.instance_variable_get(:@local_label).visible.equal?(true),'local nickname not visible on idle map')
+$game_temp.in_menu=true
+check(channel.safe_map?.equal?(false),'menu visibility predicate did not return false')
+ghosts.update
+check(ghosts.instance_variable_get(:@local_label).visible.equal?(false),'nickname not hidden in menu')
+$game_temp.in_menu=false
+saved_player=$game_player;$game_player=nil
+check(channel.safe_map?.equal?(false),'missing player visibility predicate returned nil')
+$game_player=saved_player
 ghosts.synchronize([peer]);visual=ghosts.rows[peer['id']];visual.update(true)
+visual.update(nil)
+check(visual.label.visible.equal?(false),'remote nickname did not normalize nil visibility')
+visual.update(true)
 check(visual.label.x==80 && !visual.label.disposed?,'nickname not centered above remote')
 check(! $game_player.through,'remote visuals changed map collision policy')
 ghosts.synchronize([peer.merge('x'=>3,'seq'=>2)]);check(ghosts.rows[peer['id']].equal?(visual),'sprite recreated each packet')

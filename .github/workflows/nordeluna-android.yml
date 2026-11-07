@@ -25,7 +25,7 @@ env:
   MKXP_Z_COMMIT: 17a5ec6cb3e8d2de05a82451bc4910f36517d322
   REFERENCE_APK_URL: https://codeberg.org/warmwinter/mkxp-z/releases/download/uranium-android@0.2.0/uranium-0.2.0.apk
   REFERENCE_APK_SHA256: 4a520f7784f1f7e3493c9970da0748a483a0f88400627bcc6a705529c1407653
-  GAME_ARCHIVE_SHA256: 0d5354a009a0eaf19c770f7767e6da830b83045649ab02c6b488dab01026e435
+  GAME_ARCHIVE_SHA256: 920341f3091efa4bed2ced9fbad65fcb7183af6f33c8f22ab20dfe2c9d4d8089
 
 jobs:
   build:

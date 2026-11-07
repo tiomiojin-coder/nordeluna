@@ -8,9 +8,9 @@ module NordelunaOnline
       def active?; !!@token; end
 
       def safe_map?
-        defined?(Scene_Map) && $scene.is_a?(Scene_Map) && $game_temp &&
+        !!(defined?(Scene_Map) && $scene.is_a?(Scene_Map) && $game_temp &&
           !$game_temp.in_battle && !$game_temp.in_menu && !$game_temp.message_window_showing &&
-          $game_map && !pbMapInterpreterRunning? && $game_player
+          $game_map && !pbMapInterpreterRunning? && $game_player)
       end
 
       def position

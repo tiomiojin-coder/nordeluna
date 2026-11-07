@@ -37,6 +37,11 @@ AreaRect=Struct.new(:x,:y,:width,:height) do
 end
 class Sprite
   attr_accessor :ox,:oy,:opacity,:src_rect
+  # mkxp's native setter rejects truthy objects and nil, unlike attr_accessor.
+  def visible=(value)
+    raise TypeError, 'Argument 0: Expected bool' unless value.equal?(true) || value.equal?(false)
+    @visible=value
+  end
   def initialize(*args);@src_rect=AreaRect.new(0,0,0,0);@opacity=255;@visible=true;@disposed=false;end
 end
 class AnimatedBitmap
