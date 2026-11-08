@@ -61,3 +61,35 @@ rescue NordelunaOnline::VersionMismatch=>error
 end
 ''','profile/save/options/compatibility assertions')
 print('PASS: actual Ruby launcher profiles, native save path, save metadata, volume and PC/Android compatibility warning')
+ruby.load_source('''
+NordelunaOnline::LauncherExperience.instance_variable_set(:@config,{'settings_only'=>true})
+$control_frames=0
+module System;def self.show_settings;$settings_requested=true;end;end
+module Graphics
+  def self.width;512;end
+  def self.height;384;end
+  def self.update;$control_frames+=1;end
+end
+module Input
+  def self.update;end
+  def self.trigger?(key);$control_frames>=3;end
+end
+class Color;def initialize(*args);end;end
+class SettingsFont;attr_accessor :size,:color;end
+class Bitmap
+  attr_reader :font
+  def initialize(*args);@font=SettingsFont.new;end
+  def fill_rect(*args);end
+  def draw_text(*args);end
+  def disposed?;!!@disposed;end
+  def dispose;@disposed=true;$control_bitmap_disposed=true;end
+end
+class Sprite
+  attr_accessor :bitmap
+  def disposed?;!!@disposed;end
+  def dispose;@disposed=true;$control_sprite_disposed=true;end
+end
+''','asynchronous native settings environment')
+ruby.load_source('begin\n'+(ROOT/'windows/PrelaunchControls.rb').read_text(encoding='utf-8')+'\nrescue SystemExit\n$settings_exited=true\nend','actual PC prelaunch settings')
+ruby.load_source("ota_check($settings_requested && $control_frames==3 && $settings_exited && $control_bitmap_disposed && $control_sprite_disposed,'settings request exited before the player returned')",'native settings return assertion')
+print('PASS: asynchronous PC controls stay alive, return on Back and dispose their resources')

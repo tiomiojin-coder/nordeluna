@@ -49,7 +49,7 @@ def row(path,url,version,code,compatibility,notes):
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--channel',choices=['stable','testers'],default='stable')
     p.add_argument('--pc',type=Path,required=True);p.add_argument('--pc-url',required=True);p.add_argument('--apk',type=Path,required=True);p.add_argument('--apk-url',required=True)
-    p.add_argument('--pc-version',default='1.1.0');p.add_argument('--pc-code',type=int,default=110);p.add_argument('--android-version',default='1.14.0');p.add_argument('--android-code',type=int,default=21)
+    p.add_argument('--pc-version',default='1.1.1');p.add_argument('--pc-code',type=int,default=111);p.add_argument('--android-version',default='1.14.0');p.add_argument('--android-code',type=int,default=21)
     p.add_argument('--compatibility',required=True);p.add_argument('--notes',type=Path,required=True)
     p.add_argument('--output',type=Path,default=ROOT/'public/launcher/releases.json');args=p.parse_args()
     data={'schema':1,'channels':{}}

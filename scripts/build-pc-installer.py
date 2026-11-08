@@ -53,22 +53,35 @@ def integrate_pc_updates(output, copied, public):
     (output / 'Data/PCContentBase.json').write_text(json.dumps(factory, separators=(',', ':')), encoding='utf-8')
     path = output / 'Plugins/Nordeluna Online/028_ContentUpdates.rb'
     source = pc_update_source(path.read_text(encoding='utf-8'))
+    changes={'028_ContentUpdates.rb':source}
+    controls=output/'Plugins/Nordeluna Online/031_LauncherExperience.rb'
+    original=controls.read_text(encoding='utf-8')
+    old="""if NordelunaOnline::LauncherExperience.config['settings_only']==true && defined?(System) && System.respond_to?(:show_settings)
+  System.show_settings
+  exit
+end"""
+    if original.count(old)!=1:raise ValueError('Revise a integracao da janela nativa de controles.')
+    changes['031_LauncherExperience.rb']=original.replace(old,(ROOT/'windows/PrelaunchControls.rb').read_text(encoding='utf-8').strip())
     ruby = Ruby(output)
-    ruby.evaluate('RubyVM::InstructionSequence.compile([%s].pack("H*").force_encoding("UTF-8")); "OK"' % json.dumps(source.encode().hex()))
+    for changed in changes.values():
+        ruby.evaluate('RubyVM::InstructionSequence.compile([%s].pack("H*").force_encoding("UTF-8")); "OK"' % json.dumps(changed.encode().hex()))
     bundle_path = output / 'Data/PluginScripts.rxdata'
     code = '''
 bundle=Marshal.load([%s].pack('H*'))
 before=Marshal.dump(bundle.reject { |entry| entry[0]=='Nordeluna Online' })
 plugin=bundle.find { |entry| entry[0]=='Nordeluna Online' }
 raise 'Online ausente' unless plugin
-entry=plugin[2].select { |row| row[0].end_with?('028_ContentUpdates.rb') }
-raise 'Atualizador ausente/duplicado' unless entry.length==1
-entry[0][1]=[%s].pack('H*')
+changes=%s
+changes.each do |name,hex|
+  entry=plugin[2].select { |row| row[0].end_with?(name) }
+  raise 'Script PC ausente/duplicado' unless entry.length==1
+  entry[0][1]=[hex].pack('H*')
+end
 raise 'Outros plugins alterados' unless before==Marshal.dump(bundle.reject { |item| item[0]=='Nordeluna Online' })
 Marshal.dump(bundle).unpack1('H*')
-''' % (json.dumps(bundle_path.read_bytes().hex()), json.dumps(zlib.compress(source.encode()).hex()))
+''' % (json.dumps(bundle_path.read_bytes().hex()),'{'+','.join(json.dumps(name)+'=>'+json.dumps(zlib.compress(body.encode()).hex()) for name,body in changes.items())+'}')
     bundle_path.write_bytes(bytes.fromhex(ruby.evaluate(code)))
-    path.write_text(source, encoding='utf-8')
+    for name,body in changes.items():(path.parent/name).write_text(body,encoding='utf-8')
 
 
 def stage(game, output):
@@ -119,7 +132,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--game', type=Path, default=DEFAULT_GAME)
     parser.add_argument('--compiler', type=Path, default=ROOT / '.cache/inno/compiler/ISCC.exe')
-    parser.add_argument('--version', default='1.1.0')
+    parser.add_argument('--version', default='1.1.1')
     args = parser.parse_args()
     if not re.fullmatch(r'\d+\.\d+\.\d+(?:\.\d+)?', args.version):
         parser.error('Use uma versão numérica, como 1.0.0.')

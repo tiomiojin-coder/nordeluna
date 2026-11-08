@@ -37,23 +37,23 @@ jobs:
           $process = Start-Process .cache/inno/setup.exe -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER',('/DIR="'+$compiler+'"')) -WindowStyle Hidden -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw 'Compiler install failed' }
       - name: Build installer and full update
-        run: python scripts/build-pc-installer.py --game pc-source --version 1.1.0
+        run: python scripts/build-pc-installer.py --game pc-source --version 1.1.1
       - name: Verify launcher and file handling
         run: |
           python scripts/test-client-launcher.py
           python scripts/test-launcher-runtime.py pc-source
       - uses: actions/upload-artifact@v4
         with:
-          name: Nordeluna-PC-1.1.0
+          name: Nordeluna-PC-1.1.1
           path: |
-            build/pc/Nordeluna-PC-1.1.0-Setup.exe*
-            build/pc/Nordeluna-PC-1.1.0-Completo.zip*
+            build/pc/Nordeluna-PC-1.1.1-Setup.exe*
+            build/pc/Nordeluna-PC-1.1.1-Completo.zip*
           compression-level: 0
           retention-days: 14
       - name: Publish Windows downloads
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view pc-1.1 --repo "$env:GITHUB_REPOSITORY"
-          if ($LASTEXITCODE -ne 0) { gh release create pc-1.1 --repo "$env:GITHUB_REPOSITORY" --title 'Nordeluna PC 1.1' --notes-file docs/release-1.14.md }
-          gh release upload pc-1.1 build/pc/Nordeluna-PC-1.1.0-Setup.exe build/pc/Nordeluna-PC-1.1.0-Setup.exe.sha256 build/pc/Nordeluna-PC-1.1.0-Completo.zip build/pc/Nordeluna-PC-1.1.0-Completo.zip.sha256 --repo "$env:GITHUB_REPOSITORY" --clobber
+          gh release view pc-1.1.1 --repo "$env:GITHUB_REPOSITORY"
+          if ($LASTEXITCODE -ne 0) { gh release create pc-1.1.1 --repo "$env:GITHUB_REPOSITORY" --title 'Nordeluna PC 1.1.1' --notes-file docs/release-1.14.md }
+          gh release upload pc-1.1.1 build/pc/Nordeluna-PC-1.1.1-Setup.exe build/pc/Nordeluna-PC-1.1.1-Setup.exe.sha256 build/pc/Nordeluna-PC-1.1.1-Completo.zip build/pc/Nordeluna-PC-1.1.1-Completo.zip.sha256 --repo "$env:GITHUB_REPOSITORY" --clobber
