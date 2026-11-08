@@ -1,0 +1,60 @@
+channel=NordelunaOnline::MapChannel
+module ModerationAreaFixture
+  def active?; $moderation_area_active.nil? ? super : $moderation_area_active;end
+end
+NordelunaOnline::Areas.singleton_class.prepend(ModerationAreaFixture)
+$moderation_area_active=false
+$game_temp=AreaTemp.new(false,false,false,false);$scene=Scene_Map.new
+channel.instance_variable_set(:@room_managed,true)
+channel.instance_variable_set(:@room,'PRACA')
+channel.instance_variable_set(:@token,'valid-old-token')
+channel.instance_variable_set(:@resume_token,'valid-old-token')
+channel.instance_variable_set(:@desired,true)
+channel.instance_variable_set(:@suspended,false)
+channel.instance_variable_set(:@outbox,{id:'a'*32,text:'teste'})
+channel.instance_variable_set(:@worker,RoomReplyTicket.new({'ok'=>false,'code'=>'CHAT_MUTED','error'=>'Mensagem: voce esta silenciado','until'=>Time.now.to_i+120}))
+channel.collect
+check(!channel.instance_variable_get(:@outbox),'muted chat retained retry outbox')
+check(channel.instance_variable_get(:@desired) && channel.instance_variable_get(:@token)=='valid-old-token','mute disconnected exploration')
+rejects('muted user composed another message') { channel.queue_message('Outra mensagem') }
+channel.instance_variable_set(:@chat_muted_until,Time.now.to_i-1)
+channel.instance_variable_set(:@last_chat,-10)
+channel.queue_message('Depois da expiracao')
+check(channel.instance_variable_get(:@outbox),'expired mute still blocked composer')
+channel.instance_variable_set(:@outbox,nil)
+
+# Existing clients already reset their visible message list when its epoch
+# changes; moderation hides therefore cannot leave a removed line on screen.
+channel.instance_variable_set(:@messages,[{'id'=>1,'nick'=>'Lunar','text'=>'Removed','timestamp'=>Time.now.to_i}])
+channel.instance_variable_set(:@chat_epoch,'before-hide')
+channel.instance_variable_set(:@chat_cursor,1)
+channel.instance_variable_set(:@operation,:ping)
+channel.instance_variable_set(:@sent_position,nil)
+channel.instance_variable_set(:@worker,RoomReplyTicket.new({'ok'=>true,'room'=>'PRACA','chat_epoch'=>'after-hide','messages'=>[],'members'=>1,'chat_muted_until'=>0}))
+channel.collect
+check(channel.messages.empty?,'hidden message remained in client history')
+
+%w[KICKED BANNED].each do |code|
+  channel.instance_variable_set(:@token,'valid-old-token')
+  channel.instance_variable_set(:@resume_token,'valid-old-token')
+  channel.instance_variable_set(:@desired,true)
+  channel.instance_variable_set(:@worker,RoomReplyTicket.new({'ok'=>false,'code'=>code,'error'=>'Punicao aplicada','until'=>Time.now.to_i+60}))
+  channel.collect
+  check(!channel.instance_variable_get(:@desired) && !channel.instance_variable_get(:@token) && !channel.instance_variable_get(:@resume_token),'sanction allowed automatic rejoin')
+  check(channel.connection_label=='Desconectado' && channel.notice=='Punicao aplicada','sanction had no clear disconnected state')
+  check(NordelunaOnline::ModerationMessages.take=='Punicao aplicada','sanction reason was not preserved for map return')
+end
+$moderation_area_active=true
+$game_temp.in_battle=true
+channel.instance_variable_set(:@suspended,true)
+channel.instance_variable_set(:@desired,true)
+map_before=$game_map.map_id
+channel.connection_failed(NordelunaOnline::ModerationError.new('KICKED','Retorno depois da batalha',Time.now.to_i+60))
+check(NordelunaOnline::Areas.instance_variable_get(:@return_pending),'sanction during suspended battle failed to schedule campaign return')
+check($game_map.map_id==map_before,'sanction transferred maps while battle was active')
+NordelunaOnline::Areas.instance_variable_set(:@return_pending,false)
+$game_temp.in_battle=false
+NordelunaOnline::ModerationMessages.take
+channel.abandon
+$moderation_area_active=nil
+'PASS: all prior runtime regressions plus mute without disconnect, composer expiry, hidden message refresh, kick/ban stop automatic rejoin and preserve clear return notices.'

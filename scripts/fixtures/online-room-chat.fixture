@@ -95,8 +95,12 @@ class Bitmap
   def text_size(text); Struct.new(:width,:height).new(text.length * 8,18); end
 end
 $chat_sprites = []
+$chat_sizes = []
 module CaptureRoomSprites
-  def create_sprite(width,height); super.tap { |sprite| $chat_sprites << sprite }; end
+  def create_sprite(width,height)
+    $chat_sizes << [width,height]
+    super.tap { |sprite| $chat_sprites << sprite }
+  end
 end
 NordelunaOnline::ChatPanel.singleton_class.prepend(CaptureRoomSprites)
 Input.const_set(:MOUSELEFT,99) unless Input.const_defined?(:MOUSELEFT)
@@ -110,12 +114,23 @@ $preview_text.clear
 channel.messages << row unless channel.messages.any? { |r| r['id'] == row['id'] }
 panel = NordelunaOnline::ChatPanel
 panel.update
-check($preview_text.any? { |s| s.include?('Lúna: Olá praça!') && s.include?(Time.at(row['timestamp']).strftime('%H:%M')) }, 'collapsed panel omitted nick/time')
+check($chat_sizes.last[0]<=168 && $chat_sizes.last[1]==30,'collapsed chat covers too much of map')
+check($preview_text.any? { |s| s=='ABCDEFGH' } && $preview_text.none? { |s| s.include?('Olá praça!') }, 'collapsed chat leaked message preview over map')
+left,top,panel_width,panel_height=panel.modal_bounds
+check(left*2+panel_width==Graphics.width && top*2+panel_height==Graphics.height && panel_width<=408 && panel_height<=316,
+  'chat history is not centered or exceeds compact bounds')
+channel.messages << row.merge('id'=>2,'text'=>'Vamos batalhar?')
+$preview_text.clear
+panel.update
+check($preview_text.include?('1'),'new message did not show compact unread badge')
 menu_before = $game_temp.in_menu
 panel.open_chat
+check($preview_text.any? { |s| s.include?('Lúna') && s.include?(Time.at(row['timestamp']).strftime('%H:%M')) } &&
+  $preview_text.any? { |s| s=='Olá praça!' }, 'history omitted separate author/time and message')
 check(!panel.modal? && $game_temp.in_menu == menu_before && $chat_sprites.last.disposed?, 'chat modal leaked resources or locked controls')
+check(panel.instance_variable_get(:@seen_message)==2 && channel.messages.length==2,'reading chat cleared history or left unread messages')
 panel.modal_loop(:diagnostic)
-check($preview_text.any? { |s| s.include?('Cliente online:') } && $preview_text.any? { |s| s.include?('Ultimo erro') }, 'diagnostic not rendered together')
+check($preview_text.any? { |s| s.include?('Cliente online:') } && panel.diagnostic_lines.any? { |s| s.include?('Ultimo erro') }, 'diagnostic lost client version or last-error history')
 check($chat_sprites.last.bitmap.disposed?, 'diagnostic bitmap leaked')
 panel.instance_variable_set(:@modal,true)
 panel.modal_loop(:chat)

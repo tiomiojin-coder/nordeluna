@@ -1,0 +1,37 @@
+$match_calls=[];$match_handoff=[];$match_cancel=false
+$match_payload=[NordelunaOnline::PokemonCodec.encode(Pokemon.new(:AIPOM,10,nil,false,false))]
+module MatchmakingClientFixture
+  def test_connection(*args);{'revision'=>9,'protocol'=>1};end
+  def choose_room_rules;'free';end
+  def select_online_team(rule);$match_payload;end
+  def frame;$area_time+=2.1;Input.update;end
+  def start_battle(session,room);$match_handoff<<[session.side,session.rules,room];0;end
+end
+NordelunaOnline.singleton_class.prepend(MatchmakingClientFixture)
+module MatchmakingNetworkFixture
+  def request(url,data)
+    return super unless data['action'].start_with?('match_')
+    $match_calls<<data
+    case data['action']
+    when 'match_enter' then {'state'=>'waiting','ticket'=>'f'*32}
+    when 'match_poll'
+      {'state'=>'matched','ticket'=>'f'*32,'room'=>{'code'=>'ABCDEFGH','token'=>'matched-session-token','side'=>1,'rules'=>'free','mode'=>'battle','seed'=>123,
+        'players'=>[{'payload'=>[]},{'payload'=>$match_payload}]}}
+    when 'match_cancel' then {'state'=>'cancelled'}
+    end
+  end
+end
+NordelunaOnline::SafeTransport.prepend(MatchmakingNetworkFixture)
+$game_temp=AreaTemp.new(false,false,false,false)
+NordelunaOnline::Friends.reset
+$hub_frames=[{},{}]
+NordelunaOnline::Matchmaking.search
+check($match_handoff.length==1 && $match_handoff[0][0]==1 && $match_handoff[0][1]=='free','matchmaking did not hand correct side/rules to existing battle flow')
+check($match_calls.map { |r| r['action'] }==%w[match_enter match_poll],'matchmaking sent redundant queue requests')
+check(!$game_temp.in_menu,'matchmaking retained modal flag after completion')
+$match_calls.clear;$match_handoff.clear
+$hub_frames=[{keys:[Input::BACK]}]
+NordelunaOnline::Matchmaking.search
+check($match_handoff.empty? && $match_calls.map { |r| r['action'] }==%w[match_enter match_cancel],'back did not cancel matchmaking before starting battle')
+check(!$game_temp.in_menu,'cancelled matchmaking retained modal flag')
+'Luna: directional chat, full nicks, recoverable shop/eggs, matched battle handoff and queue cancellation passed; all previous battle/trade/area regressions passed.'

@@ -139,6 +139,8 @@ def inventory(source):
         for base, dirs, names in os.walk(source / folder, followlinks=False):
             parent = Path(base).relative_to(source).as_posix()
             def include_directory(name):
+                if parent == "Plugins" and name == "New Animation Editor BETA":
+                    return False  # Authoring tool; not present in the runtime plugin bundle.
                 if name in DEVELOPMENT_DIRS or (Path(base) / name).is_symlink():
                     return False
                 if parent == "Plugins" and (name == "output" or name.startswith("_") and
@@ -199,6 +201,13 @@ def package_game(source, output, stop, notify):
                 raise UpdateError(f"Nome de arquivo sem UTF-8: {entry.filename}")
     with output.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    # Keep future map patches tied to the exact files included in this APK.
+    # This writes only local authoring metadata; source game/saves stay read-only.
+    if "Plugins/Nordeluna Online/028_ContentUpdates.rb" in manifest:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("apk_content_base", ROOT / "scripts/content-update-tools.py")
+        content = importlib.util.module_from_spec(spec); spec.loader.exec_module(content)
+        content.capture_apk_base(output)
     notify("log", f"Pacote conferido: {len(manifest)} arquivos do jogo.")
     return digest
 
@@ -293,7 +302,7 @@ def monitor(client, settings, stop, notify):
                     failed = [step["name"] for job in jobs for step in job.get("steps", []) if step.get("conclusion") == "failure"]
                     raise UpdateError("Build falhou" + (": " + ", ".join(failed) if failed else "") + ". Abra o GitHub para consultar o log.")
                 artifacts = client.get(f"actions/runs/{run['id']}/artifacts")["artifacts"]
-                artifact = next((a for a in artifacts if a["name"].startswith("Nordeluna-Android") and not a["expired"]), None)
+                artifact = next((a for a in artifacts if a["name"].startswith("Nordeluna-Android") and 'testers' not in a['name'] and not a["expired"]), None)
                 if not artifact:
                     raise UpdateError("Build concluída, mas o APK não foi encontrado nos artifacts.")
                 folder = Path(settings["downloads"]).expanduser().resolve() / (artifact["name"] + "-" + str(run["id"]))

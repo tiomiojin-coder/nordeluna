@@ -175,7 +175,8 @@ module NordelunaOnline
           @busy = true
           begin
             MapChannel.disconnect
-            pbMessage(_INTL("Conexao interrompida. Voce voltou ao ponto salvo da campanha."))
+            message=defined?(ModerationMessages) && ModerationMessages.take
+            pbMessage(message || _INTL("Conexao interrompida. Voce voltou ao ponto salvo da campanha."))
           rescue StandardError => error
             NordelunaOnline.record_online_error(error, "area_return")
             pbMessage(_INTL("Nao foi possivel concluir o retorno: {1}", error.message))

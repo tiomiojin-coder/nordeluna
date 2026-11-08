@@ -63,6 +63,8 @@ Marshal.dump(bundle).unpack1("H*")
             archive.write(folder / "meta.txt", f'Plugins/{plugin["folder"]}/meta.txt')
             for name, path in plugin["sources"].items():
                 archive.write(path, f'Plugins/{plugin["folder"]}/{name}')
+            for path in sorted((folder/'assets').rglob('*.png')):
+                archive.write(path, f'Plugins/{plugin["folder"]}/{path.relative_to(folder).as_posix()}')
     if args.install:
         if bundle.read_bytes() != original:
             raise RuntimeError("Bundle changed during compilation; close the editor and retry")

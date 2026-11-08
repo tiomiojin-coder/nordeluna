@@ -1,0 +1,90 @@
+favorites=NordelunaOnline::ShopFavorites
+preview=NordelunaOnline::ShopPreview
+old_preview_player,old_preview_bag,old_preview_storage=$player,$bag,$PokemonStorage
+$player=GiftFixturePlayer.new([],0);$bag=GiftFixtureBag.new;$PokemonStorage=GiftFixtureStorage.new
+$PokemonGlobal.nordeluna_shop_favorites=nil
+favorites.toggle('balls5')
+check(favorites.include?('balls5'),'favorite did not toggle on')
+saved=Marshal.load($area_files[SaveData::FILE_PATH])[:global_metadata]
+check(saved.nordeluna_shop_favorites[NordelunaOnline.server]==['balls5'],'favorite not persisted in save')
+before=Marshal.dump($PokemonGlobal.nordeluna_shop_favorites)
+$gift_save_fail=true
+rejects('favorite ignored failed save') { favorites.toggle('aipom_egg') }
+$gift_save_fail=false
+check(Marshal.dump($PokemonGlobal.nordeluna_shop_favorites)==before,'failed favorite save changed wishlist')
+item={'id'=>'balls5','title'=>'5 Poke Balls','price'=>25,'rewards'=>[{'kind'=>'item','id'=>'POKEBALL','quantity'=>5}]}
+check(favorites.label(item,10).include?('faltam 15 LC'),'wishlist omitted amount missing')
+check(favorites.label(item,50).include?('25 LC'),'affordable favorite showed wrong price')
+check(!preview.financials(item,10)[:buyable] && preview.financials(item,50)[:after]==25,'preview financial summary incorrect')
+
+# Sprite doubles exercise actual factory parameters and ownership/disposal.
+$preview_icons=[]
+class ShopFixtureVisual < Sprite
+  attr_accessor :zoom_x,:zoom_y
+  attr_reader :parameters
+  def initialize(*args)
+    super(nil);@bitmap=Bitmap.new(48,48);$preview_icons<<self
+  end
+  def width;48;end
+  def height;48;end
+  def update;end
+  def dispose;@bitmap.dispose unless @bitmap.disposed?;super;end
+end
+original_item_icon=Object.const_defined?(:ItemIconSprite) ? ItemIconSprite : nil
+original_pokemon_icon=Object.const_defined?(:PokemonSprite) ? PokemonSprite : nil
+Object.send(:remove_const,:ItemIconSprite) if original_item_icon
+Object.send(:remove_const,:PokemonSprite) if original_pokemon_icon
+Object.const_set(:ItemIconSprite,Class.new(ShopFixtureVisual) do
+  def initialize(x,y,item,viewport=nil);super(viewport);@parameters=[item];end
+end)
+Object.const_set(:PokemonSprite,Class.new(ShopFixtureVisual) do
+  def setSpeciesBitmap(*args);@parameters=args;end
+end)
+real_preview=preview.method(:open).super_method
+begin
+  $game_temp=AreaTemp.new(false,false,false,false)
+  calls=$purchase_calls.length
+  $preview_text.clear
+  $hub_frames=[{}, {keys:[Input::USE]}]
+  check(real_preview.call(item,50)==:buy,'preview could not confirm with controller')
+  check($preview_icons.last.parameters==[:POKEBALL] && $preview_icons.last.disposed?,'item preview used wrong graphic or leaked sprite')
+  check($preview_text.include?('Apos compra: 25 LC'),'preview omitted balance after purchase')
+  check($chat_sprites.last.disposed? && !$game_temp.in_menu,'preview failed to release modal resources')
+  egg={'id'=>'aipom_egg','title'=>'Ovo de Aipom','price'=>80,'rewards'=>[{'kind'=>'pokemon','species'=>'AIPOM','level'=>1,'form'=>0,'shiny'=>false,'egg'=>true}]}
+  $hub_frames=[{}, {keys:[Input::USE]}, {keys:[Input::RIGHT]}, {keys:[Input::USE]}, {keys:[Input::BACK]}]
+  check(real_preview.call(egg,10)==:back,'insufficient funds allowed buy instead of favorite/back')
+  check($preview_icons.last.parameters==[:AIPOM,0,0,false,false,false,true],'egg preview did not request real egg sprite')
+  check(favorites.include?('aipom_egg') && $preview_text.include?('Faltam: 70 LC'),'controller favorite or missing balance failed')
+  pokemon=egg.merge('id'=>'noctgeist','title'=>'Noctgeist','rewards'=>[egg['rewards'][0].merge('species'=>'NOCTGEIST','egg'=>false)])
+  $hub_frames=[{}, {keys:[Input::BACK]}]
+  real_preview.call(pokemon,100)
+  check($preview_icons.last.parameters.first==:NOCTGEIST && $preview_icons.last.parameters.last==false,'Fakemon preview showed an egg or another species')
+  outfit={'id'=>'outfits','title'=>'Roupas','price'=>0,'rewards'=>[],'enabled'=>false}
+  $hub_frames=[{}, {keys:[Input::USE]}, {keys:[Input::RIGHT]}, {keys:[Input::USE]}, {keys:[Input::BACK]}]
+  check(real_preview.call(outfit,100)==:back && favorites.include?('outfits'),'future outfits were purchasable or could not be wishlisted')
+  check($purchase_calls.length==calls,'preview/favorites unexpectedly made a purchase API request')
+  check($preview_icons.all?(&:disposed?),'preview leaked an animated sprite')
+ensure
+  Object.send(:remove_const,:ItemIconSprite);Object.send(:remove_const,:PokemonSprite)
+  Object.const_set(:ItemIconSprite,original_item_icon) if original_item_icon
+  Object.const_set(:PokemonSprite,original_pokemon_icon) if original_pokemon_icon
+end
+
+badges=NordelunaOnline::CosmeticBadges
+$PokemonGlobal.nordeluna_show_badges=nil
+badges.receive('lunar_participant')
+check(badges.own=='lunar_participant' && badges.show?,'earned badge did not enter local display cache')
+badges.toggle_visibility
+check(!badges.show? && Marshal.load($area_files[SaveData::FILE_PATH])[:global_metadata].nordeluna_show_badges==false,'hide badges preference not durable')
+$gift_save_fail=true
+rejects('badge visibility ignored failed save') { badges.toggle_visibility }
+$gift_save_fail=false
+check(!badges.show?,'failed badge preference save did not roll back')
+badges.toggle_visibility
+bitmap=Bitmap.new(264,60)
+$preview_text.clear
+NordelunaOnline::OnlineUI.nameplate(bitmap,'OliveiraBigBoss','available','community_50')
+check($preview_text.include?('OliveiraBigBoss'),'badge truncated long nickname')
+bitmap.dispose
+$player,$bag,$PokemonStorage=old_preview_player,old_preview_bag,old_preview_storage
+'Shop preview: item/egg/Fakemon graphics, controller actions, affordability, durable wishlist and rollback, no API charge during preview, sprite cleanup; badge visibility persists without clipping nick. All prior regressions passed.'

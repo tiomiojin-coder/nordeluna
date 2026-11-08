@@ -1,4 +1,5 @@
 import importlib.util
+import ast
 import json
 import os
 from pathlib import Path
@@ -19,12 +20,28 @@ spec.loader.exec_module(builder)
 
 
 class DiscloudPackageTest(unittest.TestCase):
+    def test_prepared_social_map_package_keeps_live_source_unchanged(self):
+        before = (ROOT / "server/relay.py").read_bytes()
+        areas = dict(plaza=39, coliseum=40, market=41)
+        with tempfile.TemporaryDirectory() as directory:
+            output = builder.package("nordeluna-online", Path(directory) / "prepared.zip", areas)
+            with zipfile.ZipFile(output) as archive:
+                tree = ast.parse(archive.read("relay.py").decode("utf-8"))
+                value = next(ast.literal_eval(node.value) for node in tree.body if isinstance(node, ast.Assign)
+                             and any(isinstance(target, ast.Name) and target.id == "DEFAULT_AREAS" for target in node.targets))
+                self.assertEqual(value, areas)
+                self.assertFalse(any("sqlite" in name or name.startswith("Data/") for name in archive.namelist()))
+            for invalid in [dict(plaza=39, coliseum=39, market=41), dict(plaza=True, coliseum=40, market=41)]:
+                with self.assertRaises(ValueError):
+                    builder.package("nordeluna-online", Path(directory) / "invalid.zip", invalid)
+        self.assertEqual((ROOT / "server/relay.py").read_bytes(), before)
+
     def test_zip_boots_without_game_or_private_data(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             archive_path = builder.package("nordeluna-online", root / "server.zip")
             with zipfile.ZipFile(archive_path) as archive:
-                self.assertEqual(set(archive.namelist()), {"main.py", "relay.py", "discloud.config", "requirements.txt"})
+                self.assertEqual(set(archive.namelist()), {"main.py", "relay.py", "gifts.py", "economy.py", "content.py", "updates.py", "moderation.py", "content-key.json", "discloud.config", "requirements.txt"})
                 self.assertIn("ID=nordeluna-online", archive.read("discloud.config").decode())
                 archive.extractall(root / "app")
             with socket.socket() as probe:
@@ -46,7 +63,8 @@ class DiscloudPackageTest(unittest.TestCase):
                                 self.fail("Packaged server failed to start")
                             time.sleep(0.05)
                     self.assertEqual(health["protocol"], 1)
-                    self.assertEqual(health["revision"], 5)
+                    self.assertEqual(health["version"], "0.10.0")
+                    self.assertEqual(health["revision"], 13)
                     self.assertTrue(health["ok"])
                     self.assertTrue((root / "app/data/relay.sqlite3").is_file())
                 finally:

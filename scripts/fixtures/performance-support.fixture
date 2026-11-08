@@ -1,0 +1,58 @@
+module MenuHandlers;def self.add(*args);end;end
+$quality_files={};$quality_stamp=0;$quality_write_fault=false
+module QualityFiles
+  def quality?(path);path.to_s.include?('.nordeluna-performance.cfg');end
+  def file?(path);quality?(path) ? $quality_files.key?(path) : super;end
+  def size(path);quality?(path) ? $quality_files.fetch(path).bytesize : super;end
+  def mtime(path);quality?(path) ? Time.at($quality_stamp) : super;end
+  def binread(path);quality?(path) ? $quality_files.fetch(path) : super;end
+  def binwrite(path,text)
+    return super unless quality?(path)
+    raise Errno::EACCES,'simulated preference lock' if $quality_write_fault
+    $quality_files[path]=text.dup;$quality_stamp+=1;text.bytesize
+  end
+  def rename(a,b)
+    return super unless quality?(a)
+    $quality_files[b]=$quality_files.delete(a);$quality_stamp+=1;0
+  end
+end
+File.singleton_class.prepend(QualityFiles)
+class Rect;def set(*args);self.x,self.y,self.width,self.height=args;end;end
+class Sprite
+  attr_accessor :zoom_x,:zoom_y,:blend_type,:angle
+  def visible=(value);raise TypeError,'Expected bool' unless value==true || value==false;@visible=value;end
+end
+class Plane<Sprite;end
+class Viewport
+  attr_accessor :z,:visible,:ox,:rect
+  def initialize(*args);@rect=Rect.new(*args);end
+  def dispose;@disposed=true;end
+end
+class Game_Player;end
+class Sprite_Shadow<Sprite
+  attr_reader :original_updates
+  def initialize(character);super(nil);@character=character;@original_updates=0;end
+  def update;@original_updates+=1;self.visible=true;self.opacity=200;end
+end
+module PBDayNight;def self.getShade;64;end;end
+module NordelunaAtmosphere
+  ASSET_ROOT='Plugins/Nordeluna Atmosphere/assets';MAX_LIGHTS=12
+  class Soundscape
+    attr_reader :last
+    def update(sound,map);@last=sound;end
+    def stop;end
+  end
+  def self.state;{count:18,particle: :leaf,fog:40,warm:20,rays:30,night:1.0,sound: :forest};end
+  def self.enabled?;true;end
+  def self.profile_for(map);:mata;end
+  def self.dark?;false;end
+end
+QualityCommand=Struct.new(:code,:parameters)
+QualityLight=Struct.new(:id,:name,:list,:screen_x,:screen_y)
+QualityMap=Struct.new(:map_id,:display_x,:display_y,:events)
+$game_map=QualityMap.new(1,0,0,(1..12).to_h { |id| [id,QualityLight.new(id,'[AtmoLight:lamp]',[QualityCommand.new(0,[])],id*20,100)] })
+$map_factory=nil;$scene=Scene_Map.new
+$game_temp=Struct.new(:in_menu,:in_battle).new(false,false)
+$game_screen=Struct.new(:shake).new(0)
+$quality_checks=0
+def quality_check(value,message);$quality_checks+=1;raise message unless value;end

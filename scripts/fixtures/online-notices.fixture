@@ -1,0 +1,39 @@
+banner=NordelunaOnline::NoticeBanner
+$notice_clock=100.0
+module NoticeFixtureClock
+  def now;$notice_clock || super;end
+end
+NordelunaOnline.singleton_class.prepend(NoticeFixtureClock)
+saved_managed=NordelunaOnline::MapChannel.instance_variable_get(:@room_managed)
+NordelunaOnline::MapChannel.instance_variable_set(:@room_managed,true)
+$game_temp=AreaTemp.new(false,false,false,false);$scene=Scene_Map.new
+row={'id'=>'a'*32,'text'=>'Evento na praca!','kind'=>'event','duration'=>8,'ends'=>Time.now.to_i+3600}
+banner.receive([row]);banner.update
+sprite=banner.instance_variable_get(:@sprite)
+check(sprite && sprite.visible && sprite.bitmap.width<=360,'small notice not rendered')
+check($preview_text.include?('EVENTO') && $preview_text.include?('Evento na praca!'),'notice omitted category/body')
+check(!$game_temp.in_menu,'notice entered a modal menu')
+before=banner.instance_variable_get(:@elapsed)
+$game_temp.message_window_showing=true
+20.times { $notice_clock+=1;banner.update }
+check(!sprite.visible && banner.instance_variable_get(:@elapsed)==before,'dialog hid countdown but consumed notice duration')
+$game_temp.message_window_showing=false;$game_temp.in_battle=true
+$notice_clock+=1;banner.update
+check(!sprite.visible && banner.instance_variable_get(:@elapsed)==before,'notice overlaid battle')
+$game_temp.in_battle=false
+100.times { $notice_clock+=0.1;banner.update }
+check(sprite.disposed? && sprite.bitmap.disposed? && !banner.instance_variable_get(:@current),'notice did not expire or leaked graphics')
+banner.receive([row]);banner.update
+check(!banner.instance_variable_get(:@current),'same notice repeated after refresh/reconnect')
+banner.receive([row.merge('id'=>'b'*32)]);banner.update
+check(banner.instance_variable_get(:@current),'new notice was suppressed')
+sprite=banner.instance_variable_get(:@sprite)
+banner.receive([])
+check(sprite.disposed? && !banner.instance_variable_get(:@current),'withdrawn notice remained visible')
+banner.receive([row.merge('id'=>'c'*32,'ends'=>Time.now.to_i-1)])
+check(banner.instance_variable_get(:@queue).empty?,'expired notice queued')
+banner.receive([row.merge('id'=>'forged','text'=>'bad')])
+check(banner.instance_variable_get(:@queue).empty?,'invalid server data queued')
+banner.reset;$notice_clock=nil
+NordelunaOnline::MapChannel.instance_variable_set(:@room_managed,saved_managed)
+'PASS: all prior online/battle/trade/update regressions; notices are compact and non-modal, pause in dialog/battle, expire, suppress repeats, withdraw, validate payloads and dispose graphics.'

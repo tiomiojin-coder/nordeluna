@@ -1,0 +1,7 @@
+Name         = Voltseon's Pause Menu
+Essentials   = 21.1
+Version      = 2.2.1
+Website      = https://eeveeexpo.com/resources/692/
+Credits      = Voltseon, Golisopod User, ENLS, Yankas, Cony, Nordeluna
+
+Requires = Nordeluna Phone,1.7.0

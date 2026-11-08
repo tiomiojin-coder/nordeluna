@@ -15,6 +15,10 @@ O token da API foi informado em janela local e não foi salvo. Não houve push n
 Configuração atual dos mapas
 ----------------------------------
 
+Atualização local: os mapas 39 (70×70), 40 e 41 e a nova chegada em X=34/Y=59
+estão descritos em [social-maps.md](social-maps.md). A configuração abaixo
+registra o estado publicado antes desse pacote local.
+
 A Praça Central está configurada como **mapa 39**, entrada em **X=21, Y=19**,
 direção 2 (baixo). O mapa salvo tem 45×50 tiles; o ponto foi conferido nos dados
 do tileset e permite passagem. Coliseu e Mercado Estelar continuam `nil` e

@@ -147,7 +147,11 @@ module NordelunaOnline
       data = { "action" => join ? "join" : "create", "mode" => mode, "profile" => profile, "build" => build }
       url = server
       if join
-        code = pbMessageFreeText(_INTL("Digite o codigo de 8 caracteres da sala."), "", false, 8).strip.upcase
+        code = if defined?(Friends) && Friends.join_code(mode)
+                 Friends.join_code(mode)
+               else
+                 pbMessageFreeText(_INTL("Digite o codigo de 8 caracteres da sala."), "", false, 8).strip.upcase
+               end
         return if code.empty?
         raise Error, "Codigo de sala invalido." unless code.match?(/\A[A-Z2-9]{8}\z/)
         info = request(url, "action" => "inspect", "code" => code)

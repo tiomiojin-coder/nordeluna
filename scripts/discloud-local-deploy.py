@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import queue
 import sqlite3
+import shlex
 import threading
 import time
 import urllib.error
@@ -65,7 +66,9 @@ class Client:
 
 def expected_package(package):
     with zipfile.ZipFile(package) as archive:
-        if set(archive.namelist()) != {"main.py", "relay.py", "requirements.txt", "discloud.config"} or archive.testzip():
+        base_files={"main.py", "relay.py", "requirements.txt", "discloud.config"}
+        content_files=base_files | {"gifts.py","economy.py","content.py","updates.py","content-key.json"}
+        if set(archive.namelist()) not in (base_files,base_files | {"gifts.py"},base_files | {"gifts.py","economy.py"},content_files,content_files | {"moderation.py"}) or archive.testzip():
             raise DeployError("O ZIP do servidor esta incompleto ou inclui arquivos inesperados.")
         tree = ast.parse(archive.read("relay.py").decode("utf-8"))
         values = {}
@@ -76,6 +79,14 @@ def expected_package(package):
                         values[target.id] = ast.literal_eval(node.value)
         if set(values) != {"REVISION", "VERSION", "DEFAULT_AREAS"}:
             raise DeployError("O pacote nao informa versao e areas esperadas.")
+        if values['REVISION']>=8 and 'gifts.py' not in archive.namelist():
+            raise DeployError('O pacote do servidor de presentes esta incompleto.')
+        if values['REVISION']>=9 and 'economy.py' not in archive.namelist():
+            raise DeployError('O pacote de Luna Coins esta incompleto.')
+        if values['REVISION']>=11 and not {'content.py','updates.py','content-key.json'} <= set(archive.namelist()):
+            raise DeployError('O pacote de conteudo dinamico esta incompleto.')
+        if values['REVISION']>=13 and 'moderation.py' not in archive.namelist():
+            raise DeployError('O pacote de moderacao esta incompleto.')
         return values
 
 
@@ -100,8 +111,11 @@ def backup_stats(archive_path, destination):
         require_rooms = "rooms" in tables
         if not require_rooms:
             raise DeployError("Tabela de salas ausente no backup. Atualizacao cancelada.")
-        return {"rooms": db.execute("SELECT COUNT(*) FROM rooms").fetchone()[0],
-                "accounts": db.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] if "accounts" in tables else 0}
+        stats={"rooms": db.execute("SELECT COUNT(*) FROM rooms").fetchone()[0],
+               "accounts": db.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] if "accounts" in tables else 0}
+        for name in ('gifts','gift_claims','wallets','coin_ledger','shop_orders','economy_activity','daily_stats','battle_reports','community_events','community_members','cosmetic_preferences','content_revisions','update_chunks','update_packages','update_drafts','update_releases','update_testers','server_notices','moderation_owner','moderators','moderation_sanctions','moderation_audit','chat_history','moderation_state'):
+            if name in tables:stats[name]=db.execute('SELECT COUNT(*) FROM '+name).fetchone()[0]
+        return stats
 
 
 def download_backup(url, output):
@@ -185,7 +199,9 @@ def deploy(token, package, notify):
         if health is None:
             raise DeployError("Codigo enviado, mas a verificacao publica nao confirmou a nova versao. Consulte os logs do Discloud.")
         # Read only numerical counts; no nick, Pokemon, account secret or room token is exported.
-        command = 'python -c "import sqlite3,json;d=sqlite3.connect(\'file:data/relay.sqlite3?mode=ro\',uri=True);print(json.dumps({\'rooms\':d.execute(\'SELECT COUNT(*) FROM rooms\').fetchone()[0],\'accounts\':d.execute(\'SELECT COUNT(*) FROM accounts\').fetchone()[0]}))"'
+        command='python -c '+shlex.quote("import sqlite3,json;d=sqlite3.connect('file:data/relay.sqlite3?mode=ro',uri=True);"
+            "tables={r[0] for r in d.execute(\"SELECT name FROM sqlite_master WHERE type='table'\")};"
+            "print(json.dumps({n:d.execute('SELECT COUNT(*) FROM '+n).fetchone()[0] for n in ('rooms','accounts','gifts','gift_claims','wallets','coin_ledger','shop_orders','economy_activity','daily_stats','battle_reports','community_events','community_members','cosmetic_preferences','content_revisions','update_chunks','update_packages','update_drafts','update_releases','update_testers','server_notices','moderation_owner','moderators','moderation_sanctions','moderation_audit','chat_history','moderation_state') if n in tables}))")
         check = client.request(route + "/console", "PUT", json.dumps({"command": command}).encode(), "application/json")
         shell = check.get("apps", {}).get("shell", {})
         output = str(shell.get("stdout", ""))
@@ -226,12 +242,12 @@ def main():
         events.put(message)
 
     root = tk.Tk()
-    root.title("Atualizar Nordeluna no Discloud")
+    root.title("Atualizar Nordeluna no Discloud - " + expected['VERSION'])
     root.geometry("650x420")
     root.minsize(590, 390)
     frame = ttk.Frame(root, padding=20); frame.pack(fill="both", expand=True)
     ttk.Label(frame, text="Atualizar o servidor Nordeluna", font=("Segoe UI", 17, "bold")).pack(anchor="w")
-    ttk.Label(frame, text=f'Aplicacao: {EXPECTED_APP}\nVersao: {expected["VERSION"]} / revisao {expected["REVISION"]}\nPraca: mapa 39. Atualiza a aplicacao existente e faz backup antes.\nO online exige cliente 0.6; APKs antigos precisam de atualizacao.',
+    ttk.Label(frame, text=f'Aplicacao: {EXPECTED_APP}\nVersao: {expected["VERSION"]} / revisao {expected["REVISION"]}\nPraca: mapa 39. Atualiza a aplicacao existente e faz backup antes.\nOs novos menus, cartoes e estados exigem o cliente {expected["VERSION"]}.',
               wraplength=600).pack(anchor="w", pady=(10, 15))
     ttk.Label(frame, text="Token da API Discloud (somente nesta janela; nao sera salvo):").pack(anchor="w")
     entry = ttk.Entry(frame, show="*", width=70); entry.pack(fill="x", pady=8); entry.focus_set()

@@ -77,6 +77,11 @@ if ($LASTEXITCODE -ne 0) {
     throw "Falha ao criar game-assets.zip (tar retornou $LASTEXITCODE)."
 }
 
+& python (Join-Path $PSScriptRoot 'content-update-tools.py') --capture-apk $archive
+if ($LASTEXITCODE -ne 0) {
+    throw "Falha ao registrar a base do atualizador de mapas."
+}
+
 Get-ChildItem -LiteralPath $assetRoot -Filter 'game-assets.zip.part*' -File |
     ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force }
 

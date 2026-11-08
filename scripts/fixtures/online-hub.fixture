@@ -1,0 +1,109 @@
+hub=NordelunaOnline::OnlineUI
+ghosts=NordelunaOnline::Ghosts
+$game_temp=AreaTemp.new(false,false,false,false)
+$game_map=AreaMap.new(1);$game_player=AreaPlayer.new;$game_player.moveto(2,2)
+$scene=Scene_Map.new
+NordelunaOnline::Friends.reset
+entries=[]
+MenuHandlers.each_available(:pause_menu) { |key,data,name| entries<<[key,name] }
+online_keys=%i[nordeluna_online nordeluna_friends nordeluna_map_emotes nordeluna_room_chat nordeluna_diagnostics nordeluna_nearby_players]
+check(entries.select { |key,name| online_keys.include?(key) }.map(&:first)==[:nordeluna_online], 'online pause entries were not unified')
+
+$hub_frames=[];$hub_input={}
+module HubInputFixture
+  def update
+    $hub_empty_frames=$hub_frames.empty? ? ($hub_empty_frames || 0)+1 : 0
+    raise "UI fixture exhausted input frames: #{$hub_trace.inspect}" if $hub_empty_frames>5
+    $hub_input=$hub_frames.shift || {}
+    ($hub_trace||=[])<<$hub_input
+  end
+  def trigger?(key); ($hub_input[:keys] || []).include?(key) || (key==Input::MOUSELEFT && $hub_input[:start]); end
+  def press?(key); key==Input::MOUSELEFT && !!$hub_input[:down]; end
+  def mouse_x; ($hub_input[:point] || [nil,nil])[0]; end
+  def mouse_y; ($hub_input[:point] || [nil,nil])[1]; end
+end
+Input.singleton_class.prepend(HubInputFixture)
+left,top,width,height=hub.bounds
+check(left*2+width==Graphics.width && top*2+height==Graphics.height,'hub panel not centered')
+list=(0...12).map { |i| "Opcao #{i}" }
+$hub_frames=[{}, {keys:[Input::UP]}, {keys:[Input::USE]}]
+result=hub.choose('Online',list,11,'Conectado')
+check(result==11 && !hub.modal? && !$game_temp.in_menu,'keyboard scroll/cancel or menu restoration failed')
+check($chat_sprites.last.disposed? && $chat_sprites.last.bitmap.disposed?,'hub leaked sprite or bitmap')
+point=[left+30,top+85]
+$hub_frames=[{point:point,start:true,down:true},{point:point,down:false}]
+check(hub.choose('Toque',list,11)==0,'tap on first row selected wrong action')
+$hub_frames=[{point:[left+30,top+242],start:true,down:true},
+  {point:[left+30,top+82],down:true},{point:[left+30,top+82],down:false},{keys:[Input::BACK]}]
+check(hub.choose('Arraste',list,11)==11,'drag released into an accidental menu action')
+$hub_frames=[{}, {keys:[Input::BACK]}]
+$game_temp.in_menu=true
+hub.choose('Voltar',list,11)
+check($game_temp.in_menu && !hub.modal?,'nested menu did not preserve its outer state')
+$game_temp.in_menu=false
+
+peer={'id'=>'fedcba9876543210','account_id'=>'a'*32,'name'=>'Solar','character'=>'trainer_RED',
+  'x'=>3,'y'=>2,'direction'=>2,'moving'=>false,'frame'=>0,'seq'=>1,'map'=>1,'profile_revision'=>'b'*16,'status'=>'available'}
+ghosts.synchronize([peer]);visual=ghosts.rows[peer['id']]
+visual.update(true)
+bitmap=visual.label.bitmap
+check(bitmap.height==60 && $preview_text.include?('Disponivel'),'availability not drawn above remote player')
+ghosts.synchronize([peer.merge('seq'=>2,'status'=>'trade')])
+check(visual.label.bitmap.equal?(bitmap) && $preview_text.include?('Em troca'),'activity change recreated nameplate or failed to render')
+rejects('invalid remote activity accepted') { ghosts.synchronize([peer.merge('seq'=>3,'status'=>'forged')]) }
+check(visual.data['status']=='trade','invalid activity modified remote metadata')
+module HubTouchDomain
+  def active?;true;end
+end
+NordelunaOnline::Areas.singleton_class.prepend(HubTouchDomain)
+module HubTouchMap
+  def safe_map?;true;end
+end
+NordelunaOnline::MapChannel.singleton_class.prepend(HubTouchMap)
+$hub_cards=[]
+module HubCardCapture
+  def peer_card(peer);$hub_cards<<peer;end
+end
+NordelunaOnline::SocialHub.singleton_class.prepend(HubCardCapture)
+point=[112,80]
+$hub_input={point:point,start:true,down:true};ghosts.touch_player
+check($hub_cards.empty?,'card opened before touch release')
+$hub_input={point:point,down:false};ghosts.touch_player
+check($hub_cards.length==1 && $hub_cards.last['account_id']==peer['account_id'],'tap selected wrong remote identity')
+$hub_input={point:point,start:true,down:true};ghosts.touch_player
+$hub_input={point:[130,80],down:true};ghosts.touch_player
+$hub_input={point:[130,80],down:false};ghosts.touch_player
+check($hub_cards.length==1,'drag gesture opened player card')
+$game_temp.in_menu=true
+$hub_input={point:point,start:true,down:true};ghosts.touch_player
+$hub_input={point:point,down:false};ghosts.touch_player
+check($hub_cards.length==1,'player card intercepted another menu')
+$game_temp.in_menu=false
+ghosts.clear
+check(bitmap.disposed?,'status label bitmap leaked after map exit')
+channel=NordelunaOnline::MapChannel
+{room_managed:true,desired:true,suspended:true,token:'hub-presence-token',worker:nil,updating:false,
+ keeping_alive:false,next_keepalive:0,url:NordelunaOnline.server,room:'PRACA'}.each { |key,value| channel.instance_variable_set("@#{key}",value) }
+channel.foreground_request=false
+NordelunaOnline::Friends.instance_variable_set(:@enabled,true)
+NordelunaOnline::Friends.instance_variable_set(:@url,NordelunaOnline.server)
+NordelunaOnline::Friends.instance_variable_set(:@busy,1)
+NordelunaOnline::Friends.instance_variable_set(:@activity,'trade')
+requests=$area_calls.length
+channel.keepalive
+check($area_calls.length==requests+1 && $area_calls.last['action']=='map_ping' && $area_calls.last.dig('social','activity')=='trade',
+  'suspended trade did not send serialized status heartbeat')
+channel.keepalive
+check($area_calls.length==requests+1,'presence heartbeat started alongside its previous request')
+channel.collect
+$area_time+=4
+channel.foreground_request=true
+channel.keepalive
+check($area_calls.length==requests+1,'presence heartbeat interrupted foreground battle transport')
+channel.foreground_request=false
+map_before=$game_map.map_id
+channel.connection_failed(NordelunaOnline::ConnectionLost.new('presence unavailable'))
+check($game_map.map_id==map_before && channel.instance_variable_get(:@suspended),'presence failure transferred maps during a battle')
+channel.abandon
+NordelunaOnline::Friends.reset
+'Online UI: one pause entry; keyboard/controller navigation; touch release and drag scrolling; centered panels; cached status labels; no card on drag or in menus. All existing battle/trade/area regressions passed.'

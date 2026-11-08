@@ -60,6 +60,10 @@ module NordelunaAtmosphere
       @warm.zoom_x = Graphics.width
       @warm.zoom_y = Graphics.height
       @fade = [@fade + dt * 1.5, 1.0].min
+      decorations=defined?(NordelunaPerformance) ? NordelunaPerformance.level(:decorations) : 2
+      @fog.visible=@warm.visible=(decorations>0)
+      @fog_detail.visible=@rays.visible=(decorations==2)
+      if decorations>0
       @warm_level = approach(@warm_level, @state[:warm], dt * 15)
       @fog_level = approach(@fog_level, @state[:fog], dt * 22)
       @ray_level = approach(@ray_level, @state[:rays], dt * 18)
@@ -76,6 +80,7 @@ module NordelunaAtmosphere
       @rays.x = -16 + Math.sin(now * 0.12) * 12
       @rays.y = -12
       @rays.opacity = @ray_level * (0.88 + Math.sin(now * 0.3) * 0.12)
+      end
       update_particles(dt, now)
       update_lights(now)
     end
@@ -183,14 +188,16 @@ module NordelunaAtmosphere
 
     def sync_lights
       wanted = {}
-      if NordelunaAtmosphere.enabled?
+      decorations=defined?(NordelunaPerformance) ? NordelunaPerformance.level(:decorations) : 2
+      budget=decorations==1 ? [MAX_LIGHTS,4].min : MAX_LIGHTS
+      if NordelunaAtmosphere.enabled? && decorations>0
         # Connected maps may be visible before the player steps into them.
         maps = $map_factory ? $map_factory.maps : [$game_map]
         maps.each do |map|
           next if NordelunaAtmosphere.profile_for(map) == :off
           map.events.each do |id, event|
             kind = light_kind(event)
-            next if !kind || wanted.length >= MAX_LIGHTS
+            next if !kind || wanted.length >= budget
             key = [map.map_id, id]
             wanted[key] = [event, kind]
           end
@@ -223,6 +230,10 @@ module NordelunaAtmosphere
     end
 
     def update_lights(now)
+      if defined?(NordelunaPerformance) && NordelunaPerformance.level(:decorations)==1
+        return if now<(@quality_light_at || 0)
+        @quality_light_at=now+1.0/15
+      end
       @lights.each_value do |entry|
         event, kind, sprite = entry.values_at(:event, :kind, :sprite)
         sprite.x = event.screen_x

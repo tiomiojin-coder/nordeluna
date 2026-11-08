@@ -1,7 +1,7 @@
 Name = Customizable Battle UI
-Version = 1.0.1
+Version = 1.1.2
 Essentials = 21.1
-Credits = Toxillian,Nordeluna
+Credits = Toxillian,Nordeluna,Voltseon,Pokemon Splice Team,BiggusWeeabus
 Website = https://eeveeexpo.com/resources/1312/
 Optional = Nordeluna Battle Presentation,1.1.2
 Optional = v21.1 Oliveira's Interface,2.2.0

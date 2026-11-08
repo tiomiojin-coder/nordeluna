@@ -8,7 +8,7 @@ module NordelunaOnline
   COLISEUM_MAP_ID = nil
   MARKET_MAP_ID = nil
   ONLINE_MAP_IDS = [PLAZA_MAP_ID, COLISEUM_MAP_ID, MARKET_MAP_ID].compact.freeze
-  PLAZA_ENTRY = { :x => 21, :y => 19, :direction => 2 }.freeze
+  PLAZA_ENTRY = { :x => 34, :y => 59, :direction => 8 }.freeze
   NICK_FONT_SIZE = 18
   NICK_COLOR = [255, 255, 255].freeze
   NICK_OUTLINE = [24, 32, 48].freeze

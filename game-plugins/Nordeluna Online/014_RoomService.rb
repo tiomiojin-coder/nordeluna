@@ -6,6 +6,8 @@ module NordelunaOnline
     end
 
     def observe_server(reply, latency = nil)
+      CosmeticBadges.receive(reply['badge']) if defined?(CosmeticBadges) && reply.key?('badge')
+      Friends.observe(reply["social"]) if defined?(Friends) && reply["social"]
       @server_diagnostic = {} if reply.key?("protocol") && reply.key?("revision")
       @server_diagnostic ||= {}
       %w[version revision protocol].each { |key| @server_diagnostic[key] = reply[key] if reply.key?(key) }

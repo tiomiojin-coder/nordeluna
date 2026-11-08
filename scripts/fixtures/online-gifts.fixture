@@ -1,0 +1,131 @@
+# Actual gift/Pokemon/codec methods; transport, storage and save-I/O doubles.
+class GiftFixtureBag
+  attr_accessor :limit
+  def initialize;@items={};@limit=999;end
+  def quantity(id);@items[id.to_s] || 0;end
+  def can_add?(id,qty);quantity(id)+qty<=@limit;end
+  def add(id,qty);return false unless can_add?(id,qty);@items[id.to_s]=quantity(id)+qty;true;end
+end
+class GiftFixtureStorage
+  def initialize;@data={};end
+  def maxBoxes;1;end
+  def maxPokemon(box);2;end
+  def [](box,slot);@data[[box,slot]];end
+  def []=(box,slot,value);@data[[box,slot]]=value;end
+end
+class GiftFixtureDex
+  attr_reader :owned,:seen
+  def initialize;@owned=[];@seen=[];end
+  def register(pokemon);@seen<<pokemon.species;end
+  def set_owned(species);@owned<<species;end
+end
+class GiftFixturePlayer
+  attr_accessor :party,:money
+  attr_reader :pokedex
+  def initialize(party,money);@party,@money=party,money;@pokedex=GiftFixtureDex.new;end
+end
+module SaveData
+  def self.save_to_file(path)
+    raise IOError,'simulated gift save failure' if $gift_save_fail
+    File.binwrite(path,Marshal.dump({global_metadata:$PokemonGlobal,player:$player,bag:$bag,storage:$PokemonStorage}))
+  end
+end
+$gift_tickets={};$gift_fault=nil;$gift_save_fail=false
+module GiftNetworkFixture
+  def request(url,data)
+    return super unless data['action'].start_with?('gift_')
+    action=data['action']
+    return {'claims'=>$gift_tickets.values} if action=='gift_history'
+    ticket=$gift_tickets.fetch(data['claim'])
+    if action=='gift_begin'
+      raise NordelunaOnline::ConnectionLost,'begin unavailable' if $gift_fault==:begin
+      ticket['state']='issued' if ticket['state']=='reserved'
+    elsif action=='gift_ack'
+      raise NordelunaOnline::ConnectionLost,'ack lost' if $gift_fault==:ack
+      ticket['state']='delivered'
+    end
+    Marshal.load(Marshal.dump(ticket))
+  end
+end
+NordelunaOnline::SafeTransport.prepend(GiftNetworkFixture)
+def fixture_gift(number,rewards)
+  ticket={'id'=>format('%032x',number),'state'=>'reserved','title'=>"Presente #{number}",'code'=>"TESTE#{number}",'rewards'=>rewards}
+  $gift_tickets[ticket['id']]=Marshal.load(Marshal.dump(ticket))
+  ticket
+end
+old_player,old_bag,old_storage=$player,$bag,$PokemonStorage
+begin
+  $game_temp=AreaTemp.new(false,false,false,false)
+  $game_map=AreaMap.new(42);$game_player=AreaPlayer.new
+  $PokemonGlobal.nordeluna_gift_pending=nil;$PokemonGlobal.nordeluna_gift_receipts=nil
+  $player=GiftFixturePlayer.new([],100);$bag=GiftFixtureBag.new;$PokemonStorage=GiftFixtureStorage.new
+  gifts=NordelunaOnline::Gifts
+  rewards=[{'kind'=>'item','id'=>'POKEBALL','quantity'=>5},{'kind'=>'money','amount'=>1000},
+    {'kind'=>'pokemon','species'=>'NOCTGEIST','level'=>10,'form'=>0,'shiny'=>true,'moves'=>['TACKLE']}]
+  gifts.prepare(fixture_gift(1,rewards))
+  check($player.party.empty? && $player.money==100 && $bag.quantity('POKEBALL')==0,'preparing gift awarded before receipt was durable')
+  check($player.pokedex.owned.empty? && $player.pokedex.seen.empty?,'preparing gift changed Pokedex before delivery')
+  check(Marshal.load($area_files[SaveData::FILE_PATH])[:global_metadata].nordeluna_gift_pending,'gift ticket not in durable save')
+  gifts.deliver
+  pokemon=$player.party.last
+  check(pokemon.species==:NOCTGEIST && pokemon.level==10 && pokemon.shiny? && pokemon.owner.name=='Nordeluna','real Fakemon gift lost species/level/shiny/original owner')
+  check(pokemon.moves.map(&:id)==[:TACKLE] && $bag.quantity('POKEBALL')==5 && $player.money==1100,'gift bundle not delivered in full')
+  check($player.pokedex.owned.include?(:NOCTGEIST),'gift did not register caught species in Pokedex')
+  saved=Marshal.load($area_files[SaveData::FILE_PATH])
+  check(saved[:player].party.length==1 && saved[:bag].quantity('POKEBALL')==5 && !saved[:global_metadata].nordeluna_gift_pending,'gift effects not saved together with delivery receipt')
+  rejects('gift could be awarded twice') { gifts.deliver }
+
+  $gift_fault=:ack
+  gifts.prepare(fixture_gift(2,[{'kind'=>'money','amount'=>100}]))
+  gifts.deliver
+  money=$player.money
+  check(!gifts.receipts.last['acked'] && !gifts.pending,'failed acknowledgement undid durable delivery or retained award ticket')
+  $gift_fault=nil;gifts.recover
+  check($player.money==money && gifts.receipts.last['acked'],'ack recovery awarded gift a second time')
+
+  gifts.prepare(fixture_gift(3,rewards))
+  before=[Marshal.dump($player.party),Marshal.dump($bag),$player.money,$area_files[SaveData::FILE_PATH],Marshal.dump($player.pokedex)]
+  $gift_save_fail=true
+  rejects('gift delivery ignored failed save') { gifts.deliver }
+  check([Marshal.dump($player.party),Marshal.dump($bag),$player.money,$area_files[SaveData::FILE_PATH],Marshal.dump($player.pokedex)]==before,'failed gift save did not roll back party/bag/money/Pokedex/durable save')
+  check(gifts.pending && $gift_tickets[format('%032x',3)]['state']=='issued','failed save lost recoverable gift ticket')
+  $gift_save_fail=false;gifts.deliver
+  check($player.party.length==2 && $bag.quantity('POKEBALL')==10,'issued-ticket recovery lost or duplicated reward')
+
+  4.times {$player.party<<Pokemon.new(:AIPOM,5,nil,false,false)}
+  2.times { |slot| $PokemonStorage[0,slot]=Pokemon.new(:AIPOM,5,nil,false,false) }
+  gifts.prepare(fixture_gift(4,rewards))
+  money=$player.money;quantity=$bag.quantity('POKEBALL')
+  rejects('gift ignored full party and boxes') { gifts.deliver }
+  check($player.money==money && $bag.quantity('POKEBALL')==quantity && $gift_tickets[format('%032x',4)]['state']=='reserved','full storage caused partial award or consumed delivery permission')
+  $PokemonStorage[0,1]=nil;gifts.deliver
+  check($player.party.length==6 && $PokemonStorage[0,1].species==:NOCTGEIST,'gift failed to use free storage slot')
+
+  $gift_save_fail=true
+  rejects('pending gift was not required to save first') { gifts.prepare(fixture_gift(5,[{'kind'=>'money','amount'=>10}])) }
+  check(!gifts.pending,'failed preparation retained unsaved pending ticket')
+  $gift_save_fail=false
+  issued=fixture_gift(6,[{'kind'=>'money','amount'=>10}]).merge('state'=>'issued')
+  rejects('old save restarted already issued gift') { gifts.prepare(issued) }
+  rejects('unknown Fakemon silently replaced with another species') { gifts.validate_rewards([rewards.last.merge('species'=>'NOT_A_SPECIES')]) }
+  rejects('impossible combined money gift accepted') { gifts.validate_rewards([{'kind'=>'money','amount'=>Settings::MAX_MONEY},{'kind'=>'money','amount'=>1}]) }
+  $bag.limit=$bag.quantity('POKEBALL')
+  gifts.prepare(fixture_gift(7,[{'kind'=>'money','amount'=>100},{'kind'=>'item','id'=>'POKEBALL','quantity'=>1}]))
+  money=$player.money
+  rejects('gift ignored full bag') { gifts.deliver }
+  check($player.money==money && gifts.pending,'full bag awarded money without items or lost pending gift')
+  $bag.limit=999;gifts.deliver
+  gifts.prepare(fixture_gift(8,[{'kind'=>'money','amount'=>100}]))
+  old_money=$player.money;$player.money=Settings::MAX_MONEY
+  rejects('gift silently discarded money above maximum') { gifts.deliver }
+  $player.money=old_money;gifts.deliver
+  gifts.prepare(fixture_gift(9,[{'kind'=>'money','amount'=>10}]))
+  money=$player.money;$gift_fault=:begin
+  rejects('gift awarded without durable server issue') { gifts.deliver }
+  check($player.money==money && gifts.pending,'failed gift permission partially awarded prize')
+  $gift_fault=nil;gifts.deliver
+ensure
+  $gift_save_fail=false
+  $player,$bag,$PokemonStorage=old_player,old_bag,old_storage
+end
+'Gifts: real Noctgeist/items/money; durable prepare/delivery; lost-ack recovery without duplicate; full storage; failed-save rollback; stale-save guard. Existing online and touch regressions passed.'

@@ -1,0 +1,31 @@
+POKÉMON NORDELUNA — WINDOWS
+
+Abra o jogo pelo atalho Pokémon Nordeluna. A tela inicial permite jogar,
+atualizar o jogo completo, configurar e restaurar backups.
+
+ATUALIZAÇÕES
+No launcher, clique em Atualizar para baixar motor, plugins e recursos.
+O jogo precisa estar fechado. O download é conferido antes de aplicar.
+O canal de testers tem uma cópia separada e seus próprios saves.
+
+No menu Online, abra a opção de atualização de mapas e recursos.
+Confirme o download e feche totalmente o jogo. Abra novamente para aplicar.
+O jogo usa o mesmo servidor, assinatura e sistema de pacotes do port Android.
+Missões, loja, eventos e códigos são administrados no painel Online existente.
+Testes restritos continuam respeitando as contas de testers do servidor.
+
+Mapas, eventos dos mapas, imagens, músicas e vídeos compatíveis podem chegar
+sem outro instalador. Atualizações do motor, plugins ou banco de Pokémon
+precisam de uma nova versão do instalador, assim como precisam de outro APK.
+
+Feche o jogo antes de reinstalar ou atualizar o programa. A reinstalação pode
+substituir mapas baixados; consulte novamente as atualizações dentro do jogo.
+Saves, conta e preferências pessoais não são incluídos na distribuição.
+
+O desinstalador mantém os arquivos do jogo para preservar saves e conteúdo
+baixado. Ele remove os atalhos e o registro do programa. Para uma limpeza
+completa, faça backup dos saves e apague a pasta do jogo manualmente.
+
+REQUISITOS
+Windows 10/11 de 64 bits. Internet para os recursos online e atualizações.
+Não exige Python, RPG Maker XP nem conta de administrador para instalar.

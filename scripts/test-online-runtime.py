@@ -59,6 +59,9 @@ for group in ("[003] Moves", "[004] Abilities", "[005] Items"):
     for p in sorted((gen9 / group).glob("*.rb")):
         chunks.append(("gen9 " + group + " " + p.name, p.read_text(encoding="utf-8")))
 maintained = Path(__file__).resolve().parents[1] / "game-plugins/Nordeluna Online"
+menu_source = (engine / "036_Event_HandlerCollections.rb").read_text(encoding="utf-8")
+chunks.append(("menu handler storage", "class HandlerHash < Hash; def add(k,v); self[k]=v; end; def remove(k); delete(k); end; end unless defined?(HandlerHash)"))
+chunks.append(("actual Essentials menu handlers", menu_source[menu_source.index("module MenuHandlers"):]))
 sources = {p.name: p for p in (PLUGINS / "Nordeluna Online").glob("*.rb")}
 sources.update({p.name: p for p in maintained.glob("*.rb")})
 for p in (sources[name] for name in sorted(sources)):
@@ -102,6 +105,15 @@ for name in sorted(sources):
         chunks.append((name, sources[name].read_text(encoding="utf-8")))
 chunks.append(("social areas and recovery", (Path(__file__).resolve().parent / "fixtures/online-areas.fixture").read_text(encoding="utf-8")))
 chunks.append(("real Essentials map interpreter regression", (Path(__file__).resolve().parent / "fixtures/online-interpreter.fixture").read_text(encoding="utf-8")))
+chunks.append(("local social-map event regressions", (Path(__file__).resolve().parent / "fixtures/social-map-events.fixture").read_text(encoding="utf-8")))
+chunks.append(("friends and invitation regressions", (Path(__file__).resolve().parent / "fixtures/online-friends.fixture").read_text(encoding="utf-8")))
+chunks.append(("mobile online hub and player cards", (Path(__file__).resolve().parent / "fixtures/online-hub.fixture").read_text(encoding="utf-8")))
+chunks.append(("durable gift delivery and recovery", (Path(__file__).resolve().parent / "fixtures/online-gifts.fixture").read_text(encoding="utf-8")))
+chunks.append(("Luna shop, eggs and directional chat", (Path(__file__).resolve().parent / "fixtures/online-luna.fixture").read_text(encoding="utf-8")))
+chunks.append(("matchmaking handoff and cancel", (Path(__file__).resolve().parent / "fixtures/online-matchmaking.fixture").read_text(encoding="utf-8")))
+chunks.append(("shop graphics, wishlist and badges", (Path(__file__).resolve().parent / "fixtures/online-shop-preview.fixture").read_text(encoding="utf-8")))
+chunks.append(("non-modal online notices", (Path(__file__).resolve().parent / "fixtures/online-notices.fixture").read_text(encoding="utf-8")))
+chunks.append(("chat moderation and terminal disconnect", (Path(__file__).resolve().parent / "fixtures/online-moderation.fixture").read_text(encoding="utf-8")))
 state = ctypes.c_int()
 # ctypes embeds Ruby without a native Ruby main stack. Disable conservative GC
 # in this short-lived test process, as its stack scanner cannot scan Python's.

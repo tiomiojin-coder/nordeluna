@@ -1,0 +1,75 @@
+# Exercise actual client parsing, transport ownership and invitation hooks.
+friends=NordelunaOnline::Friends
+channel=NordelunaOnline::MapChannel
+channel.abandon
+friends.reset
+$game_map=AreaMap.new(42);$scene=Scene_Map.new
+$game_temp=AreaTemp.new(false,false,false,false)
+social={'ok'=>true,'revision'=>6,'request_count'=>1,'invite_count'=>1,'status'=>'available',
+  'friends'=>[{'id'=>'a'*32,'nickname'=>'Lunar','status'=>'available','compatible'=>true}],
+  'incoming'=>[],'outgoing'=>[],
+  'invitations'=>[{'id'=>'b'*32,'nickname'=>'Lunar','mode'=>'battle','code'=>'ABCDEFGH','expires'=>99999}]}
+friends.snapshot(social)
+check(friends.badge==2,'social notification count lost')
+rejects('invalid social count accepted') { friends.observe(social.merge('invite_count'=>-1)) }
+rejects('nonboolean compatibility accepted') { friends.snapshot(social.merge('friends'=>[social['friends'][0].merge('compatible'=>'true')])) }
+rejects('invalid invitation accepted') { friends.snapshot(social.merge('invitations'=>[social['invitations'][0].merge('code'=>'bad')])) }
+friends.instance_variable_set(:@worker,RoomReplyTicket.new(social))
+channel.foreground_request=nil
+friends.drain
+check(channel.foreground_request.nil? && friends.instance_variable_get(:@worker).nil?, 'social drain did not restore nil transport ownership')
+friends.instance_variable_set(:@worker,RoomReplyTicket.new(social))
+channel.foreground_request=true
+friends.drain
+check(channel.foreground_request==true,'social drain released outer request lock')
+channel.foreground_request=false
+class FriendsBadTicket
+  attr_reader :canceled
+  def alive?;false;end
+  def value;raise IOError,'connection dropped';end
+  def cancel;@canceled=true;end
+end
+bad=FriendsBadTicket.new
+friends.instance_variable_set(:@worker,bad)
+friends.drain
+check(bad.canceled && !channel.foreground_request,'failed background request leaked ticket or map lock')
+
+module FriendsFixtureNetwork
+  def request(url,data)
+    return super unless data['action'].start_with?('social_') || data['action']=='cancel'
+    $friend_calls<<data
+    raise NordelunaOnline::ConnectionLost,'offline' if $friend_fail && data['action']=='social_invite'
+    {'ok'=>true}
+  end
+end
+NordelunaOnline::SafeTransport.prepend(FriendsFixtureNetwork)
+$friend_calls=[];$friend_fail=false
+friends.instance_variable_set(:@target,social['friends'][0])
+friends.after_request(NordelunaOnline.server,{'action'=>'create','mode'=>'battle'}, {'code'=>'ABCDEFGH','token'=>'room-owner-token'})
+check($friend_calls.last.values_at('action','target','room_token')==['social_invite','a'*32,'room-owner-token'],'invitation lost owner authorization')
+$friend_fail=true
+rejects('failed invitation silently succeeded') { friends.after_request(NordelunaOnline.server,{'action'=>'create','mode'=>'trade'}, {'code'=>'ABCDEFGH','token'=>'room-owner-token'}) }
+check($friend_calls.last.values_at('action','code')==['cancel','ABCDEFGH'],'failed invitation left orphan room')
+$friend_fail=false
+friends.instance_variable_set(:@target,nil)
+friends.instance_variable_set(:@incoming,{'mode'=>'trade','code'=>'ABCDEFGH'})
+check(friends.join_code('trade')=='ABCDEFGH' && friends.join_code('battle').nil?,'invitation prefilled wrong mode')
+friends.after_request(NordelunaOnline.server,{'action'=>'join','code'=>'ABCDEFGH'}, {})
+check(friends.instance_variable_get(:@joined),'successful invitation join was not recorded')
+friends.instance_variable_set(:@enabled,false)
+original_status=$PokemonGlobal.nordeluna_social_status
+$PokemonGlobal.nordeluna_social_status='busy'
+check(friends.payload['status']=='busy' && friends.payload['busy']==false,'manual status incorrectly changed automatic battle state')
+begin
+  friends.busy do
+    check(friends.payload['busy']==true,'battle/trade did not mark busy')
+    raise IOError,'simulated battle failure'
+  end
+rescue IOError
+end
+check(friends.payload['busy']==false && friends.status=='busy','failed battle reset manual busy status')
+$PokemonGlobal.nordeluna_social_status=original_status
+friends.observe(social)
+Game.load_map
+check(friends.badge==0 && !friends.enabled? && friends.join_code('trade').nil?,'loading another save retained social identity')
+'Online: existing battle/trade/area regressions and new friends, invitations, presence and transport cleanup passed.'

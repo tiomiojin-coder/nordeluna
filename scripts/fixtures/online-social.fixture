@@ -120,7 +120,8 @@ end
 
 # Render, de-duplicate, expire and hide map bubbles using display doubles.
 class Bitmap < PreviewBitmap
-  def initialize(*args); super(); end
+  attr_reader :width,:height
+  def initialize(width=64,height=64); @width,@height=width,height; super(); end
   def dispose; @disposed = true; end
   def disposed?; !!@disposed; end
 end

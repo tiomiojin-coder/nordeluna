@@ -252,7 +252,8 @@ class RelayTests(unittest.TestCase):
         view = self.call("map_update", token=fresh["token"], state=dict(map=1, x=1, y=1),
                          chat_enabled=True, chat_epoch=old_epoch, after=99999)
         self.assertNotEqual(old_epoch, view["chat_epoch"])
-        self.assertEqual(view["messages"], [])
+        self.assertEqual([message["text"] for message in view["messages"]],
+                         ["Oi " + str(number) for number in range(5, 85)])
 
     def test_trade_commit_survives_restart_and_cancel(self):
         a, b = self.pair("trade")

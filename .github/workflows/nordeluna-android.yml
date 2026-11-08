@@ -10,6 +10,7 @@ on:
       - android/**
       - game-assets/**
       - scripts/prepare-android-archive.py
+      - scripts/prepare-client-android.py
       - scripts/prepare-android-game.sh
       - scripts/prepare-android-movies.py
       - scripts/pack-android-directory.py
@@ -19,18 +20,20 @@ on:
       - server/**
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   MKXP_Z_COMMIT: 17a5ec6cb3e8d2de05a82451bc4910f36517d322
   REFERENCE_APK_URL: https://codeberg.org/warmwinter/mkxp-z/releases/download/uranium-android@0.2.0/uranium-0.2.0.apk
   REFERENCE_APK_SHA256: 4a520f7784f1f7e3493c9970da0748a483a0f88400627bcc6a705529c1407653
-  GAME_ARCHIVE_SHA256: 920341f3091efa4bed2ced9fbad65fcb7183af6f33c8f22ab20dfe2c9d4d8089
+  GAME_ARCHIVE_SHA256: 3d6aacd7b66c5c5319f075f23936d14e7297f8e142418081a64fc30816708fcb
 
 jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      ANDROID_KEYSTORE: ${{ secrets.NORDELUNA_ANDROID_KEYSTORE }}
 
     steps:
       - name: Checkout Nordeluna
@@ -72,15 +75,38 @@ jobs:
           git clone --no-checkout https://codeberg.org/warmwinter/mkxp-z.git build-android/mkxp-z
           git -C build-android/mkxp-z checkout "$MKXP_Z_COMMIT"
           git -C build-android/mkxp-z apply "$GITHUB_WORKSPACE/android/nordeluna.patch"
+          python3 scripts/test-performance-panel.py build-android/mkxp-z
 
       - name: Check touch controls visibility
         run: python3 scripts/test-touch-controls.py build-android/mkxp-z
 
       - name: Preserve sideload signing key
+        if: env.ANDROID_KEYSTORE == ''
         uses: actions/cache@v4
         with:
           path: ~/.android/debug.keystore
           key: nordeluna-sideload-signing-v1
+
+      - name: Load private signing key
+        if: env.ANDROID_KEYSTORE != ''
+        run: |
+          mkdir -p ~/.android
+          printf '%s' "$ANDROID_KEYSTORE" | base64 --decode > ~/.android/debug.keystore
+          chmod 600 ~/.android/debug.keystore
+
+      - name: Prepare encrypted migration of existing signing key
+        if: env.ANDROID_KEYSTORE == ''
+        run: |
+          test -s ~/.android/debug.keystore
+          python3 scripts/export-build-signing-key.py ~/.android/debug.keystore build-android/signing-key.enc.json
+
+      - name: Export encrypted signing migration
+        if: env.ANDROID_KEYSTORE == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nordeluna-signing-migration-encrypted
+          path: build-android/signing-key.enc.json
+          retention-days: 1
 
       - name: Fetch pinned native Android libraries
         run: |
@@ -101,10 +127,12 @@ jobs:
           cp android/OnlineBridge.java "$APP_MAIN/java/com/mkxpz/launcher/OnlineBridge.java"
           cp android/MovieMailbox.java "$APP_MAIN/java/com/mkxpz/launcher/MovieMailbox.java"
           cp android/AndroidMovieBridge.java "$APP_MAIN/java/com/mkxpz/launcher/AndroidMovieBridge.java"
+          cp android/PerformanceOptions.java "$APP_MAIN/java/com/mkxpz/launcher/PerformanceOptions.java"
           cp build-android/nordeluna-game.zip "$APP_MAIN/assets/nordeluna-game.zip"
           cp android/nordeluna-display.rb "$APP_MAIN/assets/nordeluna-display.rb"
           cp android/assets/nordeluna-launcher.png \
             "$APP_MAIN/res/drawable/nordeluna_icon.png"
+          python3 scripts/prepare-client-android.py build-android/mkxp-z
 
       - name: Build installable APK
         working-directory: build-android/mkxp-z/android
@@ -113,26 +141,55 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew --no-daemon --stacktrace :app:assembleDebug
+          ./gradlew --no-daemon --stacktrace :app:assembleStableDebug :app:assembleTestersDebug
 
       - name: Verify and name APK
         run: |
           set -euo pipefail
-          APK="$(find build-android/mkxp-z/android/app/build/outputs/apk/debug -name '*.apk' -type f -print -quit)"
+          APK="$(find build-android/mkxp-z/android/app/build/outputs/apk/stable/debug -name '*.apk' -type f -print -quit)"
           test -n "$APK"
           unzip -l "$APK" | grep -F 'assets/nordeluna-game.zip'
           unzip -l "$APK" | grep -F 'lib/arm64-v8a/libmkxp-z.so'
-          cp "$APK" build-android/Nordeluna-Android-arm64-v1.13.apk
-          sha256sum build-android/Nordeluna-Android-arm64-v1.13.apk > build-android/Nordeluna-Android-arm64-v1.13.apk.sha256
-          ls -lh build-android/Nordeluna-Android-arm64-v1.13.apk
+          cp "$APK" build-android/Nordeluna-Android-arm64-v1.14.apk
+          TESTERS="$(find build-android/mkxp-z/android/app/build/outputs/apk/testers/debug -name '*.apk' -type f -print -quit)"
+          test -n "$TESTERS"
+          cp "$TESTERS" build-android/Nordeluna-Android-testers-arm64-v1.14.apk
+          sha256sum build-android/Nordeluna-Android-testers-arm64-v1.14.apk > build-android/Nordeluna-Android-testers-arm64-v1.14.apk.sha256
+          sha256sum build-android/Nordeluna-Android-arm64-v1.14.apk > build-android/Nordeluna-Android-arm64-v1.14.apk.sha256
+          ls -lh build-android/Nordeluna-Android-arm64-v1.14.apk
+
+      - name: Verify Android launcher backups
+        run: |
+          JSON_JAR="$(find ~/.gradle/caches/modules-2/files-2.1/org.json/json -name '*.jar' -print -quit)"
+          test -n "$JSON_JAR"
+          mkdir -p build-android/launcher-tests
+          javac --release 8 -encoding UTF-8 -cp "$JSON_JAR" -d build-android/launcher-tests android/ClientFiles.java scripts/fixtures/ClientFilesTest.java
+          java -cp "build-android/launcher-tests:$JSON_JAR" ClientFilesTest "$(mktemp -d)"
+
+      - name: Upload testers APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nordeluna-Android-testers-arm64-v1.14
+          path: |
+            build-android/Nordeluna-Android-testers-arm64-v1.14.apk
+            build-android/Nordeluna-Android-testers-arm64-v1.14.apk.sha256
+          compression-level: 0
+          retention-days: 14
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Nordeluna-Android-arm64-v1.13
+          name: Nordeluna-Android-arm64-v1.14
           path: |
-            build-android/Nordeluna-Android-arm64-v1.13.apk
-            build-android/Nordeluna-Android-arm64-v1.13.apk.sha256
+            build-android/Nordeluna-Android-arm64-v1.14.apk
+            build-android/Nordeluna-Android-arm64-v1.14.apk.sha256
           compression-level: 0
           retention-days: 14
+
+      - name: Publish Android download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view android-1.14 --repo "$GITHUB_REPOSITORY" || gh release create android-1.14 --repo "$GITHUB_REPOSITORY" --title "Nordeluna Android 1.14" --notes-file docs/release-1.14.md
+          gh release upload android-1.14 build-android/Nordeluna-Android-arm64-v1.14.apk build-android/Nordeluna-Android-arm64-v1.14.apk.sha256 build-android/Nordeluna-Android-testers-arm64-v1.14.apk build-android/Nordeluna-Android-testers-arm64-v1.14.apk.sha256 --repo "$GITHUB_REPOSITORY" --clobber
 

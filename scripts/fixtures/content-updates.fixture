@@ -1,0 +1,81 @@
+$ota_files={};$ota_dirs={'.'=>true};$ota_fault=nil
+class UpdateMemoryIO
+  def initialize(file,mode)
+    @file=file;@position=0
+    $ota_files[file]=''.b if mode=='wb'
+  end
+  def read(size)
+    data=$ota_files.fetch(@file).byteslice(@position,size)
+    @position+=data.bytesize if data
+    data && !data.empty? ? data : nil
+  end
+  def write(data);$ota_files[@file]<<data;data.bytesize;end
+end
+module UpdateMemoryFiles
+  def file?(file);$ota_files.key?(file);end
+  def binread(file);$ota_files.fetch(file).dup;end
+  def binwrite(file,data);$ota_files[file]=data.dup;data.bytesize;end
+  def size(file);$ota_files.fetch(file).bytesize;end
+  def delete(file);$ota_files.delete(file);end
+  def rename(from,to)
+    if $ota_fault==to
+      $ota_fault=nil;raise IOError,'simulated storage failure'
+    end
+    $ota_files[to]=$ota_files.delete(from) || (raise IOError,'missing temporary file');0
+  end
+  def open(file,mode)
+    handle=UpdateMemoryIO.new(file,mode)
+    yield handle
+  end
+end
+File.singleton_class.prepend(UpdateMemoryFiles)
+module UpdateMemoryDirectories
+  def exist?(directory);!!$ota_dirs[directory];end
+  def mkdir(directory);$ota_dirs[directory]=true;end
+end
+Dir.singleton_class.prepend(UpdateMemoryDirectories)
+module Graphics
+  def self.frame_reset;end
+  def self.update;end
+end
+module Input
+  BACK=1
+  def self.update;end
+  def self.trigger?(_key);false;end
+end
+module EventHandlers
+  def self.add(*args);end
+end
+module Game
+  def self.load_map;end
+end
+class PokemonGlobalMetadata;end
+module NordelunaOnline
+  class Error<StandardError;end
+  class Cancelled<Error;end
+  MAX_RESPONSE=524288
+  def self.record_online_error(*args);end
+end
+
+# Python verifies zlib bytes separately. This double exercises Ruby's streaming
+# bounds/finalization without loading a native extension into the embedded VM.
+module Zlib
+  class Inflate
+    def initialize;@data=''.b;end
+    def inflate(bytes)
+      @data<<bytes
+      $ota_plain.fetch(@data,'').dup
+    end
+    def finished?;$ota_plain.key?(@data);end
+    def close;end
+  end
+end
+
+def ota_check(value,message);raise message unless value;end
+def ota_reject(message)
+  begin;yield
+  rescue NordelunaOnline::Error,IOError;return
+  end
+  raise message
+end
+

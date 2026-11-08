@@ -1,0 +1,154 @@
+# Strict XP-like graphics/input surface. No save or network I/O.
+Rect = Struct.new(:x,:y,:width,:height)
+Font = Struct.new(:size,:color,:bold)
+class Color
+  attr_reader :values
+  def initialize(*values); @values=values; end
+end
+class Bitmap
+  attr_reader :width,:height,:font,:ops,:path
+  def initialize(w,h=nil)
+    if h; @width,@height=w,h; else; @path=w;@width,@height=DIMS.fetch(w);end
+    @font=Font.new(22,Color.new(248,248,248),false);@ops=[];@disposed=false
+  end
+  def clear; raise 'disposed bitmap clear' if @disposed;@ops.clear;end
+  def fill_rect(*args); raise 'disposed bitmap fill' if @disposed;end
+  def blt(x,y,b,r); raise 'disposed bitmap blt' if @disposed || b.disposed?;@ops << [x,y,b.path,r.to_a];end
+  def text_size(s);Rect.new(0,0,s.to_s.length*10,24);end
+  def disposed?;@disposed;end
+  def dispose;raise 'double bitmap dispose' if @disposed;@disposed=true;end
+end
+class Sprite
+  attr_accessor :x,:y,:z,:ox,:oy,:zoom_x,:zoom_y,:opacity,:bitmap,:src_rect,:color
+  attr_reader :visible
+  def initialize(viewport=nil)
+    @x=@y=@z=@ox=@oy=0;@zoom_x=@zoom_y=1;@opacity=255;@disposed=false;@visible=true
+    @src_rect=Rect.new(0,0,0,0)
+  end
+  def visible=(v);raise 'expected bool' unless v==true || v==false;@visible=v;end
+  def update;raise 'disposed sprite update' if @disposed;end
+  def disposed?;@disposed;end
+  def dispose;raise 'double sprite dispose' if @disposed;@disposed=true;end
+end
+class BitmapSprite < Sprite
+  def initialize(w,h,v=nil);super(v);self.bitmap=Bitmap.new(w,h);end
+  def dispose;bitmap.dispose unless bitmap.disposed?;super;end
+end
+class IconSprite < Sprite
+  def initialize(x,y,viewport);super(viewport);@x=x;@y=y;end
+  def setBitmap(path)
+    bitmap.dispose if bitmap && !bitmap.disposed?
+    self.bitmap=Bitmap.new(path+'.png')
+  end
+  def dispose;bitmap.dispose if bitmap && !bitmap.disposed?;super;end
+end
+class AnimatedSprite < Sprite
+  def initialize(path,frames,w,h,speed,viewport);super(viewport);self.bitmap=Bitmap.new(path+'.png');end
+  def play;end
+  def dispose;bitmap.dispose unless bitmap.disposed?;super;end
+end
+class PokemonIconSprite < Sprite
+  def initialize(pokemon,viewport);super(viewport);end
+end
+class Viewport
+  attr_accessor :z
+  def initialize(*);@disposed=false;end
+  def dispose;raise 'double viewport dispose' if @disposed;@disposed=true;end
+  def disposed?;@disposed;end
+end
+module RPG;module Cache
+  def self.load_bitmap(root,name);Bitmap.new(root+name+'.png');end
+end;end
+module Graphics
+  def self.width;512;end
+  def self.height;384;end
+  def self.frame_rate;60;end
+  def self.average_frame_rate;60;end
+  def self.update;end
+end
+module System;def self.uptime;1.0;end;end
+module Input
+  LEFT=:LEFT;RIGHT=:RIGHT;UP=:UP;DOWN=:DOWN;BACK=:BACK;ACTION=:ACTION;USE=:USE
+  class << self;attr_accessor :queue,:keys;end
+  self.queue=[];self.keys=[]
+  def self.update;self.keys=queue.shift || [:BACK];end
+  def self.trigger?(key);keys.include?(key);end
+  def self.repeat?(key);keys.include?(key);end
+  def self.press?(key);keys.include?(key);end
+end
+module Settings;MAX_PARTY_SIZE=6;SAFARI_STEPS=500;end
+module MenuHandlers
+  HANDLERS=Hash.new { |hash,key| hash[key]={} }
+  def self.add(menu,key,hash);HANDLERS[menu][key]=hash;end
+  def self.each_available(menu)
+    HANDLERS[menu].sort_by { |_,h|h['order'] || 0 }.each do |key,h|
+      next if h['condition'] && !h['condition'].call
+      name=h['name'].is_a?(Proc) ? h['name'].call : h['name']
+      yield key,h,name
+    end
+  end
+end
+class EnumOption;end
+class NumberOption;end
+class PokemonSystem;end
+class Game_Temp
+  attr_accessor :menu_last_choice,:in_menu,:menu_calling,:in_battle
+  def initialize;@menu_last_choice=0;@in_battle=false;end
+end
+class PokemonPauseMenu_Scene;end
+class PokemonPauseMenu
+  def initialize(scene);@scene=scene;end
+end
+class Scene_Map;end
+class Pokemon
+  attr_accessor :egg,:hp,:exp,:level,:fraction
+  def initialize;@hp=50;@exp=100;@level=100;@fraction=0.0;end
+  def totalhp;100;end
+  def egg?;!!@egg;end
+  def exp_fraction;@fraction;end
+  def hasItem?;false;end
+  def fainted?;hp==0;end
+  def status;:NONE;end
+  def pokerusStage;0;end
+  def shiny?;true;end
+end
+class TestPlayer
+  attr_accessor :party,:opened,:closed
+  def initialize;@party=[Pokemon.new];@opened=@closed=0;end
+  def party_count;party.length;end
+  def update_party_time;@opened+=1;end
+  def last_update_time(time);@closed+=1;end
+end
+class TestMap
+  def name;'Praca Central';end
+  def update;end
+end
+class TestGamePlayer;def straighten;end;end
+def _INTL(text,*args);args.each_with_index { |a,i|text=text.gsub('{'+(i+1).to_s+'}',a.to_s) };text;end
+def pbResolveBitmap(path);DIMS.key?(path+'.png') ? path+'.png' : nil;end
+def pbSetSystemFont(*);end
+def pbSetSmallFont(*);end
+def pbDrawTextPositions(bitmap,rows);raise 'disposed text bitmap' if bitmap.disposed?;end
+def pbSEPlay(*);end
+def pbPlayDecisionSE;end
+def pbUpdateSceneMap;end
+def pbUpdateSpriteHash(hash);hash.each_value { |s|s.update if s && !s.disposed? };end
+def pbDisposeSpriteHash(hash)
+  hash.each_value { |s|s.dispose if s && !s.disposed? };hash.clear
+end
+def pbInSafari?;false;end
+def pbInBugContest?;false;end
+def pbGetTimeNow;Time.new(2026,11,8,10,0);end
+def pbGetAbbrevMonthName(*);'Nov';end
+def pbMessage(*);raise 'Unexpected missing-asset failsafe';end
+module GameData;module Status;def self.count;8;end;end;end
+class << FileTest
+  alias vpm_test_exist? exist?
+  def exist?(path);path=='Graphics/UI/VPM/' || vpm_test_exist?(path);end
+end
+$player=TestPlayer.new
+$PokemonSystem=PokemonSystem.new
+$game_temp=Game_Temp.new
+$game_map=TestMap.new
+$game_player=TestGamePlayer.new
+def check(value,message);raise message unless value;end

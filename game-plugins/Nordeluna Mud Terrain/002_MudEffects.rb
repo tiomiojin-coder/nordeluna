@@ -25,6 +25,10 @@ module NordelunaMudTerrain
 
     def update
       return if disposed?
+      if defined?(NordelunaPerformance) && NordelunaPerformance.level(:decorations)==0
+        dispose
+        return
+      end
       elapsed = [Process.clock_gettime(Process::CLOCK_MONOTONIC) - @started_at, 0.0].max
       if elapsed >= EFFECT_DURATION
         dispose
@@ -73,7 +77,7 @@ module NordelunaMudTerrain
       # Caminho direto dos assets do plugin; respeita o volume de SE do jogador.
       Audio.se_play(path, volume, 98 + (@step_number % 3) * 2) if volume > 0
     end
-    if VISUAL_ENABLED
+    if VISUAL_ENABLED && (!defined?(NordelunaPerformance) || NordelunaPerformance.decoration_step?(@step_number))
       spriteset = $scene.spriteset(event.map_id)
       spriteset&.addUserSprite(FootstepSprite.new(event.map, event.x, event.y, @step_number))
     end

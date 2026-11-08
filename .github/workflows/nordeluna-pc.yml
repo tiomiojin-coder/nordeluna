@@ -1,0 +1,59 @@
+name: Build Nordeluna PC
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Reconstruct current game
+        shell: python
+        run: |
+          import hashlib, pathlib, zipfile
+          parts=sorted(pathlib.Path('game-assets').glob('game-assets.zip.part*'))
+          with open('game.zip','wb') as out:
+              for p in parts: out.write(p.read_bytes())
+          expected=pathlib.Path('game-assets/sha256.txt').read_text().split()[0]
+          assert hashlib.file_digest(open('game.zip','rb'),'sha256').hexdigest()==expected
+          with zipfile.ZipFile('game.zip') as z: z.extractall('pc-source')
+          with zipfile.ZipFile('windows/runtime.zip') as z: z.extractall('pc-source')
+      - name: Prepare pinned installer compiler
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force .cache/inno | Out-Null
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe' -OutFile .cache/inno/setup.exe
+          $expected = (Get-Content windows/inno-setup.sha256).Split(' ')[0]
+          if ((Get-FileHash .cache/inno/setup.exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Compiler hash mismatch' }
+          $compiler = Join-Path $pwd '.cache/inno/compiler'
+          $process = Start-Process .cache/inno/setup.exe -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER',('/DIR="'+$compiler+'"')) -WindowStyle Hidden -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Compiler install failed' }
+      - name: Build installer and full update
+        run: python scripts/build-pc-installer.py --game pc-source --version 1.1.0
+      - name: Verify launcher and file handling
+        run: |
+          python scripts/test-client-launcher.py
+          python scripts/test-launcher-runtime.py pc-source
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nordeluna-PC-1.1.0
+          path: |
+            build/pc/Nordeluna-PC-1.1.0-Setup.exe*
+            build/pc/Nordeluna-PC-1.1.0-Completo.zip*
+          compression-level: 0
+          retention-days: 14
+      - name: Publish Windows downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view pc-1.1 --repo "$env:GITHUB_REPOSITORY"
+          if ($LASTEXITCODE -ne 0) { gh release create pc-1.1 --repo "$env:GITHUB_REPOSITORY" --title 'Nordeluna PC 1.1' --notes-file docs/release-1.14.md }
+          gh release upload pc-1.1 build/pc/Nordeluna-PC-1.1.0-Setup.exe build/pc/Nordeluna-PC-1.1.0-Setup.exe.sha256 build/pc/Nordeluna-PC-1.1.0-Completo.zip build/pc/Nordeluna-PC-1.1.0-Completo.zip.sha256 --repo "$env:GITHUB_REPOSITORY" --clobber

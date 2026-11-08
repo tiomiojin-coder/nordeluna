@@ -9,6 +9,12 @@ module NordelunaOnline
         defined?(System) && System.respond_to?(:is_windows?) && System.is_windows?
       end
 
+      def idle?
+        !@active || !@active.alive?
+      rescue Error
+        true
+      end
+
       def start(url, data)
         busy = false
         begin
@@ -183,6 +189,9 @@ module NordelunaOnline
       reply = JSON.parse(raw)
       unless reply.is_a?(Hash) && reply["ok"] == true
         message = reply.is_a?(Hash) ? reply["error"].to_s : "Resposta invalida."
+        if defined?(ModerationError) && reply.is_a?(Hash) && %w[CHAT_MUTED KICKED BANNED].include?(reply['code'])
+          raise ModerationError.new(reply['code'],message,reply['until'])
+        end
         raise VersionMismatch, "As versoes nao sao compativeis. Atualize os dois jogos." if message.match?(/versoes do jogo sao diferentes|Protocolo incompativel/i)
         raise ConnectionLost, "A conexao foi interrompida. Nenhuma vitoria por queda." if message.match?(/Batalha encerrada|Sala nao encontrada/)
         raise Error, message

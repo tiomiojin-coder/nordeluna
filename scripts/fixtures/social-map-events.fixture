@@ -1,0 +1,54 @@
+# Exercise the actual local map-event helpers using real Pokemon data.
+social=NordelunaOnline::SocialMaps
+old_player=$player
+old_anchor=$PokemonGlobal.nordeluna_online_return
+old_debug=$DEBUG
+old_switches=$game_self_switches
+original_game_map=$game_map
+original_online_maps=NordelunaOnline::ONLINE_MAP_IDS
+original_token=NordelunaOnline::MapChannel.instance_variable_get(:@token)
+begin
+  $game_map=AreaMap.new(39)
+  noct=Pokemon.new(:NOCTGEIST,50);noct.hp=1
+  egg=Pokemon.new(:AIPOM,5);egg.steps_to_hatch=100;egg.hp=1
+  $player=Struct.new(:party).new([noct,egg])
+  $PokemonGlobal.nordeluna_online_return={'map'=>42,'x'=>15,'y'=>22,'direction'=>8}
+  anchor=Marshal.dump($PokemonGlobal.nordeluna_online_return)
+  before_files=$area_files.dup
+  $area_confirm<<true
+  check(social.heal && noct.hp==noct.totalhp && egg.hp==1,'social rest failed to heal real Noctgeist or changed egg')
+  check(Marshal.dump($PokemonGlobal.nordeluna_online_return)==anchor,'social healing changed campaign return')
+  check($area_files==before_files,'social healing unexpectedly saved over campaign progress')
+  $game_self_switches=Hash.new(false)
+  $area_confirm<<true;social.phase_stone(2)
+  check(!$game_self_switches[[39,30,'A']],'wrong lunar phase advanced puzzle')
+  [0,1].each { |i| $area_confirm<<true;social.phase_stone(i) }
+  # RGSS self switches survive a save/load; do not depend on a module cache.
+  $game_self_switches=Marshal.load(Marshal.dump($game_self_switches))
+  [2,3].each { |i| $area_confirm<<true;social.phase_stone(i) }
+  check($game_self_switches[[39,30,'D']],'four phases did not complete saved puzzle')
+  rejects('invalid lunar pedestal accepted') { social.phase_stone(4) }
+  old_map=$game_map.map_id;old_position=[$game_player.x,$game_player.y]
+  $DEBUG=false
+  NordelunaOnline::Areas.instance_variable_set(:@inside,true)
+  requests=$area_calls.length
+  check(social.door(40,19,31,8)==false,'unreleased interior bypassed area allowlist')
+  check($area_calls.length==requests && $game_map.map_id==old_map && [$game_player.x,$game_player.y]==old_position,
+        'unreleased interior moved player or sent unauthorized request')
+  NordelunaOnline.send(:remove_const,:ONLINE_MAP_IDS);NordelunaOnline.const_set(:ONLINE_MAP_IDS,[39,40,41].freeze)
+  NordelunaOnline::MapChannel.instance_variable_set(:@token,'fixture-area-token')
+  check(social.door(40,19,31,8),'configured interior door failed')
+  check($game_map.map_id==40 && [$game_player.x,$game_player.y]==[19,31],'interior door destination differs from map event')
+  check(Marshal.dump($PokemonGlobal.nordeluna_online_return)==anchor,'door replaced the campaign anchor')
+  check($area_calls.last['action']=='map_enter' && $area_calls.last['map']==40,'door bypassed server authorization')
+ensure
+  $player=old_player
+  $PokemonGlobal.nordeluna_online_return=old_anchor
+  $DEBUG=old_debug
+  $game_self_switches=old_switches
+  NordelunaOnline::Areas.instance_variable_set(:@inside,false)
+  $game_map=original_game_map
+  NordelunaOnline.send(:remove_const,:ONLINE_MAP_IDS);NordelunaOnline.const_set(:ONLINE_MAP_IDS,original_online_maps)
+  NordelunaOnline::MapChannel.instance_variable_set(:@token,original_token)
+end
+'OK: real Noctgeist recovery; egg/campaign return preserved; saved lunar puzzle; pending interiors cannot bypass server allowlist.'

@@ -3,6 +3,7 @@ from contextlib import closing
 import io
 import json
 from pathlib import Path
+import re
 import sqlite3
 import tempfile
 import unittest
@@ -14,6 +15,7 @@ spec = importlib.util.spec_from_file_location("local_deploy", ROOT / "scripts/di
 deploy = importlib.util.module_from_spec(spec); spec.loader.exec_module(deploy)
 spec = importlib.util.spec_from_file_location("deploy_package", ROOT / "scripts/package-discloud.py")
 builder = importlib.util.module_from_spec(spec); spec.loader.exec_module(builder)
+MODERATION_TABLES = ("moderation_owner", "moderators", "moderation_sanctions", "moderation_audit", "chat_history", "moderation_state")
 
 
 class DiscloudDeployTests(unittest.TestCase):
@@ -37,6 +39,9 @@ class DiscloudDeployTests(unittest.TestCase):
         with closing(sqlite3.connect(db)) as connection:
             connection.execute("CREATE TABLE rooms(code TEXT PRIMARY KEY,data TEXT)")
             connection.execute("INSERT INTO rooms VALUES('receipt','committed')")
+            for name in MODERATION_TABLES:
+                connection.execute("CREATE TABLE " + name + "(id INTEGER PRIMARY KEY)")
+                connection.execute("INSERT INTO " + name + " VALUES(1)")
             connection.commit()
         self.backup = self.root / "backup.zip"
         with zipfile.ZipFile(self.backup, "w") as archive:
@@ -44,11 +49,51 @@ class DiscloudDeployTests(unittest.TestCase):
 
     def test_package_and_backup_inspection(self):
         expected = deploy.expected_package(self.package)
+        self.assertEqual(expected["VERSION"], "0.10.0")
+        self.assertEqual(expected["REVISION"], 13)
         self.assertEqual(expected["DEFAULT_AREAS"], dict(plaza=39, coliseum=None, market=None))
-        self.assertEqual(deploy.backup_stats(self.backup, self.root / "inspect.sqlite3"), dict(rooms=1, accounts=0))
+        self.assertEqual(deploy.backup_stats(self.backup, self.root / "inspect.sqlite3"),
+                         dict(rooms=1, accounts=0, **{name: 1 for name in MODERATION_TABLES}))
+
+    def test_revision_12_rollback_remains_supported_without_moderation(self):
+        rollback = self.root / "rollback.zip"
+        with zipfile.ZipFile(self.package) as original, zipfile.ZipFile(rollback, "w") as archive:
+            for entry in original.infolist():
+                if entry.filename == "moderation.py":
+                    continue
+                contents = original.read(entry)
+                if entry.filename == "relay.py":
+                    source = re.sub(r'(?m)^REVISION = [^\r\n]+', 'REVISION = 12', contents.decode("utf-8"))
+                    contents = re.sub(r'(?m)^VERSION = [^\r\n]+', 'VERSION = "0.9.1"', source).encode("utf-8")
+                archive.writestr(entry, contents)
+        expected = deploy.expected_package(rollback)
+        self.assertEqual((expected["VERSION"], expected["REVISION"]), ("0.9.1", 12))
+
+    def test_revision_13_requires_moderation_module(self):
+        incomplete = self.root / "incomplete.zip"
+        with zipfile.ZipFile(self.package) as original, zipfile.ZipFile(incomplete, "w") as archive:
+            for entry in original.infolist():
+                if entry.filename != "moderation.py":
+                    archive.writestr(entry, original.read(entry))
+        with self.assertRaisesRegex(deploy.DeployError, "moderacao"):
+            deploy.expected_package(incomplete)
+
+    def test_backup_before_moderation_remains_supported(self):
+        source = self.root / "legacy.sqlite3"
+        with closing(sqlite3.connect(source)) as connection:
+            connection.execute("CREATE TABLE rooms(code TEXT PRIMARY KEY,data TEXT)")
+            connection.execute("INSERT INTO rooms VALUES('receipt','committed')")
+            connection.commit()
+        backup = self.root / "legacy.zip"
+        with zipfile.ZipFile(backup, "w") as archive:
+            archive.write(source, "data/relay.sqlite3")
+        self.assertEqual(deploy.backup_stats(backup, self.root / "legacy-inspect.sqlite3"),
+                         dict(rooms=1, accounts=0))
 
     def test_order_and_public_health_confirmation(self):
         calls = []
+        console_commands = []
+        counts = dict(rooms=1, accounts=0, **{name: 1 for name in MODERATION_TABLES})
         backup = self.backup
         class Client:
             def __init__(self, token): self.token=token
@@ -56,11 +101,13 @@ class DiscloudDeployTests(unittest.TestCase):
                 calls.append((method,route))
                 if route=="/app/all":return {"apps":[{"id":"nordeluna-online.discloud.dev","online":True}]}
                 if route.endswith("/backup"):return {"backups":{"url":"https://backup.example/one.zip"}}
-                if route.endswith("/console"):return {"apps":{"shell":{"stdout":json.dumps(dict(rooms=1,accounts=0))}}}
+                if route.endswith("/console"):
+                    console_commands.append(json.loads(args[0])["command"])
+                    return {"apps":{"shell":{"stdout":json.dumps(counts)}}}
                 if route.endswith("/start"):raise deploy.DeployError("Discloud respondeu HTTP 409 em PUT start.")
                 return {"status":"ok"}
             def commit(self, app_id, package): calls.append(("COMMIT",app_id))
-        health = {"revision":5,"version":"0.6.0","areas":dict(plaza=39,coliseum=None,market=None)}
+        health = {"revision":13,"version":"0.10.0","areas":dict(plaza=39,coliseum=None,market=None)}
         def download(url,destination):destination.write_bytes(backup.read_bytes())
         with patch.object(deploy,"ROOT",self.root),patch.object(deploy,"Client",Client), \
              patch.object(deploy,"download_backup",download),patch.object(deploy.time,"sleep"), \
@@ -69,5 +116,13 @@ class DiscloudDeployTests(unittest.TestCase):
         steps=[route for _,route in calls]
         self.assertLess(next(i for i,s in enumerate(steps) if s.endswith('/stop')), next(i for i,s in enumerate(steps) if s.endswith('/backup')))
         self.assertLess(next(i for i,s in enumerate(steps) if s.endswith('/backup')), next(i for i,(method,_) in enumerate(calls) if method=='COMMIT'))
-        self.assertEqual(result["database"],dict(rooms=1,accounts=0))
+        self.assertEqual(result["database"], counts)
+        self.assertTrue(all(name in console_commands[0] for name in MODERATION_TABLES))
         self.assertNotIn("private-test-token",json.dumps(result))
+
+        counts["chat_history"] = 0
+        with patch.object(deploy,"ROOT",self.root),patch.object(deploy,"Client",Client), \
+             patch.object(deploy,"download_backup",download),patch.object(deploy.time,"sleep"), \
+             patch.object(deploy.urllib.request,"urlopen",return_value=io.BytesIO(json.dumps(health).encode())):
+            with self.assertRaisesRegex(deploy.DeployError, "preservacao do banco"):
+                deploy.deploy("private-test-token",self.package,lambda *args:None)

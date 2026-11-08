@@ -1,0 +1,5 @@
+Name = v21.1 Oliveira's Menu
+Version = 2.1.0
+Essentials = 21.1
+Requires = Nordeluna RE Visual Core,1.0.0
+Credits = Nordeluna

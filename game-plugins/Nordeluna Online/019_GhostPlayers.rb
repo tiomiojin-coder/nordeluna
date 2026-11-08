@@ -124,7 +124,7 @@ module NordelunaOnline
           next unless label.visible
           # At most two small shifts; crowded names fade rather than forming a tower.
           overlaps = occupied.count { |x,y| (label.x - x).abs < 110 && (label.y - y).abs < 18 }
-          label.y -= [overlaps, 2].min * 12
+          label.y = [label.y - [overlaps, 2].min * 12, 2].max
           label.opacity = 170 if overlaps > 2
           occupied << [label.x, label.y]
         end

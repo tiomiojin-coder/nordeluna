@@ -1,0 +1,42 @@
+prefs=NordelunaPerformance
+quality_check(prefs.level(:particles)==2 && prefs.level(:shadows)==2 && prefs.level(:decorations)==2,'default quality changed')
+renderer=NordelunaAtmosphere::Renderer.new
+renderer.refresh($clock)
+quality_check(renderer.instance_variable_get(:@particles).length==18,'normal particle budget')
+quality_check(renderer.instance_variable_get(:@lights).length==12,'normal light budget')
+old_particles=renderer.instance_variable_get(:@particles).map { |p| p[:sprite] }
+quality_check(prefs.set(:particles,1),'reduced preference save failed')
+renderer.refresh($clock)
+quality_check(renderer.instance_variable_get(:@particles).length==6,'reduced mode did not reduce allocations')
+quality_check(old_particles.all?(&:disposed?),'old particles leaked after changing budget')
+quality_check(prefs.level(:shadows)==2 && prefs.level(:decorations)==2,'particle preference changed unrelated options')
+prefs.set(:decorations,0);renderer.refresh($clock);renderer.update
+quality_check(renderer.instance_variable_get(:@lights).empty?,'disabled lights still allocated')
+quality_check(renderer.instance_variable_get(:@fog).visible==false && renderer.instance_variable_get(:@rays).visible==false,'disabled decorations still visible')
+quality_check(renderer.instance_variable_get(:@particles).length==6,'decorations switched off atmospheric particles too')
+quality_check(renderer.instance_variable_get(:@sound).last==:forest,'visual budgets changed ambient audio')
+mud=NordelunaMudTerrain::FootstepSprite.new($game_map,3,3,1)
+quality_check(mud.disposed? && mud.bitmap.disposed?,'disabled mud visual not released')
+prefs.set(:decorations,1);renderer.refresh($clock);renderer.update
+quality_check(renderer.instance_variable_get(:@lights).length==4,'reduced decoration did not cap lights')
+quality_check(renderer.instance_variable_get(:@fog_detail).visible==false && renderer.instance_variable_get(:@rays).visible==false,'reduced decoration retained extra fullscreen layers')
+quality_check(!prefs.decoration_step?(1) && prefs.decoration_step?(2),'reduced mud frequency')
+prefs.set(:particles,0);renderer.refresh($clock)
+quality_check(renderer.instance_variable_get(:@particles).empty?,'disabled particles retained sprites')
+player=Sprite_Shadow.new(Game_Player.new);npc=Sprite_Shadow.new(Object.new)
+prefs.set(:shadows,1);player.update;npc.update
+quality_check(player.original_updates==1 && npc.original_updates==0 && npc.visible==false,'reduced shadows not limited to player')
+prefs.set(:shadows,0);player.update
+quality_check(player.original_updates==1 && player.visible==false,'disabled shadow still updates')
+prefs.set(:shadows,2);player.update;npc.update
+quality_check(player.original_updates==2 && npc.original_updates==1 && player.visible==true,'shadows failed to return or alias recursion')
+$quality_write_fault=true
+quality_check(!prefs.set(:particles,2) && prefs.level(:particles)==0,'failed write replaced last valid preference')
+$quality_write_fault=false
+$quality_files[prefs.path]="version=1\nparticles=2\nshadows=0\ndecorations=1\n";$quality_stamp+=1;$clock+=1.1
+quality_check(prefs.level(:particles)==2 && prefs.level(:shadows)==0 && prefs.level(:decorations)==1,'Android file changes not picked up live')
+$quality_files[prefs.path]="version=1\nparticles=9\nshadows=1\n";$quality_stamp+=1;$clock+=1.1
+quality_check(prefs.level(:particles)==2 && prefs.level(:shadows)==1 && prefs.level(:decorations)==2,'corrupt value fallback changed independent settings')
+renderer.dispose
+quality_check(renderer.disposed,'renderer cleanup failed')
+'quality checks passed'

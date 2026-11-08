@@ -1,0 +1,70 @@
+# Directional focus must reach every chat action without a mouse.
+$game_temp=AreaTemp.new(false,false,false,false)
+$game_map=AreaMap.new(42);$game_player=AreaPlayer.new;$scene=Scene_Map.new
+NordelunaOnline::MapChannel.abandon
+NordelunaOnline::Friends.reset
+before_error=NordelunaOnline.diagnostic_snapshot['last_error']
+$hub_frames=[{keys:[Input::RIGHT]},{keys:[Input::RIGHT]},{keys:[Input::USE]}]
+NordelunaOnline::ChatPanel.modal_loop(:chat)
+check(!NordelunaOnline::ChatPanel.modal? && $hub_frames.empty?,'directional chat focus did not reach Recolher')
+check(NordelunaOnline.diagnostic_snapshot['last_error']==before_error,'directional chat action raised an internal error')
+bitmap=Bitmap.new(264,60)
+$preview_text.clear
+NordelunaOnline::OnlineUI.nameplate(bitmap,'OliveiraBigBoss','available')
+check($preview_text.include?('OliveiraBigBoss'),'long nickname was truncated despite available room')
+bitmap.dispose
+
+module PurchaseConfirmFixture
+  def choose(title,options,*args)
+    $purchase_options=options
+    options.length-2
+  end
+end
+NordelunaOnline::OnlineUI.singleton_class.prepend(PurchaseConfirmFixture)
+module PurchasePreviewConfirmFixture
+  def open(item,balance); :buy; end
+end
+NordelunaOnline::ShopPreview.singleton_class.prepend(PurchasePreviewConfirmFixture)
+$purchase_calls=[];$purchase_orders={};$purchase_lost=false
+module PurchaseNetworkFixture
+  def request(url,data)
+    return super unless data['action'].start_with?('economy_')
+    $purchase_calls<<data
+    if data['action']=='economy_buy'
+      saved=Marshal.load($area_files[SaveData::FILE_PATH])[:global_metadata]
+      check(saved.nordeluna_shop_pending['id']==data['order'],'purchase sent before durable local request ID')
+      ticket=fixture_gift(100,[{'kind'=>'pokemon','species'=>'AIPOM','level'=>1,'form'=>0,'shiny'=>false,'egg'=>true}])
+      $purchase_orders[data['order']]||={'balance'=>20,'claim'=>ticket}
+      raise NordelunaOnline::ConnectionLost,'purchase reply lost' if $purchase_lost
+      $purchase_orders[data['order']]
+    elsif data['action']=='economy_order'
+      $purchase_orders[data['order']] || {'claim'=>nil,'balance'=>100}
+    end
+  end
+end
+NordelunaOnline::SafeTransport.prepend(PurchaseNetworkFixture)
+old_player,old_bag,old_storage=$player,$bag,$PokemonStorage
+begin
+  $player=GiftFixturePlayer.new([],0);$bag=GiftFixtureBag.new;$PokemonStorage=GiftFixtureStorage.new
+  $PokemonGlobal.nordeluna_gift_pending=nil;$PokemonGlobal.nordeluna_shop_pending=nil
+  $PokemonGlobal.nordeluna_gift_receipts=[]
+  eco=NordelunaOnline::LunaEconomy
+  eco.instance_variable_set(:@snapshot,{'balance'=>100})
+  item={'id'=>'aipom_egg','title'=>'Ovo de Aipom','price'=>80,'rewards'=>[{'kind'=>'pokemon','species'=>'AIPOM','level'=>1,'form'=>0,'shiny'=>false,'egg'=>true}]}
+  $purchase_lost=true
+  rejects('lost purchase reply silently completed') { eco.buy(item) }
+  check(eco.pending && $player.party.empty?,'lost purchase response lost recovery ID or delivered prize early')
+  order=eco.pending['id'];$purchase_lost=false
+  eco.recover_purchase
+  check(!eco.pending && $player.party.length==1 && $player.party[0].egg?,'recovered purchase did not deliver a real egg')
+  check(eco.snapshot['balance']==20,'recovered purchase left stale balance in menu')
+  check($player.pokedex.owned.empty?,'unhatched egg registered as caught')
+  check($purchase_calls.count { |row| row['action']=='economy_buy' }==1,'recovering order charged it a second time')
+  check($purchase_calls.any? { |row| row['action']=='economy_order' && row['order']==order },'recovery did not query original purchase')
+  before=$purchase_calls.length
+  eco.buy(item.merge('enabled'=>false))
+  check($purchase_calls.length==before,'unavailable clothes caused a purchase request')
+ensure
+  $player,$bag,$PokemonStorage=old_player,old_bag,old_storage
+end
+'Luna: directional chat controls; uncropped nick; durable purchase ID; lost-response recovery without second charge; real unhatched egg; no charge for future clothes. All gift/battle/area/UI regressions passed.'

@@ -73,7 +73,8 @@ module NordelunaOnline
       if operation == :update
         signature = data["state"].reject { |key, _| key == "seq" }
         urgent = data["chat"] || data["emote"]
-        return false if !urgent && signature == @last_position_signature && NordelunaOnline.now - (@last_position_sent || -10) < POSITION_HEARTBEAT
+        heartbeat=members<=1 ? 5.0 : POSITION_HEARTBEAT
+        return false if !urgent && signature == @last_position_signature && NordelunaOnline.now - (@last_position_sent || -10) < heartbeat
         @last_position_signature = signature
         @last_position_sent = NordelunaOnline.now
         data = data.merge("known_peers" => Ghosts.known_metadata)
