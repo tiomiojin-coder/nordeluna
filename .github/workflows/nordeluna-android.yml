@@ -141,7 +141,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew --no-daemon --stacktrace :app:assembleStableDebug :app:assembleTestersDebug
+          ./gradlew --no-daemon --stacktrace :app:assembleStableDebug :app:assembleBetaDebug
 
       - name: Verify and name APK
         run: |
@@ -151,7 +151,7 @@ jobs:
           unzip -l "$APK" | grep -F 'assets/nordeluna-game.zip'
           unzip -l "$APK" | grep -F 'lib/arm64-v8a/libmkxp-z.so'
           cp "$APK" build-android/Nordeluna-Android-arm64-v1.14.apk
-          TESTERS="$(find build-android/mkxp-z/android/app/build/outputs/apk/testers/debug -name '*.apk' -type f -print -quit)"
+          TESTERS="$(find build-android/mkxp-z/android/app/build/outputs/apk/beta/debug -name '*.apk' -type f -print -quit)"
           test -n "$TESTERS"
           cp "$TESTERS" build-android/Nordeluna-Android-testers-arm64-v1.14.apk
           sha256sum build-android/Nordeluna-Android-testers-arm64-v1.14.apk > build-android/Nordeluna-Android-testers-arm64-v1.14.apk.sha256

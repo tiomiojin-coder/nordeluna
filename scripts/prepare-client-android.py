@@ -59,11 +59,11 @@ def prepare(engine):
     build=build.replace(needle,'''    flavorDimensions "channel"
     productFlavors {
         stable { dimension "channel" }
-        testers { dimension "channel"; applicationIdSuffix ".testers"; versionNameSuffix "-testers" }
+        beta { dimension "channel"; applicationIdSuffix ".testers"; versionNameSuffix "-testers" }
     }
 '''+needle)
     gradle.write_text(build,encoding='utf-8')
-    beta=engine/'android/app/src/testers/res/values/client_channel.xml';beta.parent.mkdir(parents=True,exist_ok=True)
+    beta=engine/'android/app/src/beta/res/values/client_channel.xml';beta.parent.mkdir(parents=True,exist_ok=True)
     beta.write_text('<resources><string name="app_name">Nordeluna Testers</string></resources>',encoding='utf-8')
     print('Launcher Android preparado:',engine)
 
