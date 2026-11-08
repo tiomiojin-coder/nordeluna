@@ -3,6 +3,9 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import os
+import shutil
+import subprocess
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
@@ -34,6 +37,13 @@ def read_ruby(source):
     # The bundled VM cannot safely perform native file I/O across Python's CRT.
     from plugin_tools import Ruby, DEFAULT_GAME
     if len(source.encode())>150000:raise ValueError('Arquivo Ruby excede 150 KB.')
+    if os.name!='nt':
+        executable=shutil.which('ruby')
+        if not executable:raise ValueError('Instale Ruby para importar arquivos Ruby neste sistema.')
+        result=subprocess.run([executable,'-rjson','-e','eval(STDIN.read, TOPLEVEL_BINDING, "conteudo-online.rb"); STDOUT.write(JSON.generate(NORDELUNA_CONTENT))'],
+                              input=source,capture_output=True,text=True,encoding='utf-8',timeout=15)
+        if result.returncode:raise ValueError('Nao foi possivel importar o arquivo Ruby local: '+result.stderr[:1000])
+        return validate_content(json.loads(result.stdout))
     ruby=Ruby()
     ruby.load_source('module NordelunaOnline; class Error < StandardError; end; MAX_RESPONSE=524288; end','local editor support')
     ruby.load_source((DEFAULT_GAME/'Plugins/Nordeluna Online/002_JSON.rb').read_text(encoding='utf-8'),'JSON codec')
