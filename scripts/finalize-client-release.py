@@ -18,13 +18,16 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--pc-tag',default='pc-1.1');parser.add_argument('--android-tag',default='android-1.14')
     parser.add_argument('--pc-code',type=int,default=110);parser.add_argument('--android-code',type=int,default=21)
+    parser.add_argument('--pc-commit');parser.add_argument('--android-commit')
     parser.add_argument('--publish',action='store_true');args=parser.parse_args()
     client=GitHub();repo=client.get('')
     if repo['private']:raise ValueError('Os jogadores precisam de acesso publico aos downloads.')
     commit=git('rev-parse','HEAD')
     for workflow in ('nordeluna-android.yml','nordeluna-pc.yml'):
+        expected_commit=args.pc_commit if workflow=='nordeluna-pc.yml' else args.android_commit
+        expected_commit=git('rev-parse',expected_commit) if expected_commit else commit
         runs=client.get(f'actions/workflows/{workflow}/runs?per_page=20')['workflow_runs']
-        if not any(row['head_sha']==commit and row['conclusion']=='success' for row in runs):raise ValueError('Aguarde a build '+workflow+' deste commit terminar com sucesso.')
+        if not any(row['head_sha']==expected_commit and row['conclusion']=='success' for row in runs):raise ValueError('Aguarde a build '+workflow+' deste commit terminar com sucesso.')
     spec=importlib.util.spec_from_file_location('catalog_signer',ROOT/'scripts/client-release-tools.py');signer=importlib.util.module_from_spec(spec);spec.loader.exec_module(signer)
     pc=client.get('releases/tags/'+args.pc_tag);android=client.get('releases/tags/'+args.android_tag)
     # Derive identity from the exact versioned archive, never a moving editor folder.

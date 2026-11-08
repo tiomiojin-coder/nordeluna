@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from plugin_tools import ROOT,DEFAULT_GAME,Ruby
 
-game=Path(sys.argv[1]) if len(sys.argv)>1 else DEFAULT_GAME
+game=(Path(sys.argv[1]) if len(sys.argv)>1 else DEFAULT_GAME).resolve()
 ruby=Ruby(game)
 ruby.load_source((ROOT/'scripts/fixtures/content-updates.fixture').read_text(encoding='utf-8'),'memory filesystem')
 ruby.load_source((game/'Plugins/Nordeluna Online/002_JSON.rb').read_text(encoding='utf-8'),'actual JSON')
