@@ -30,6 +30,49 @@ def worker(root,status,token,manager,service,done):
 def make_testers(parent,root,status,token,manager,review):
     import tkinter as tk
     from tkinter import ttk
+    from tkinter import filedialog,messagebox
+    import json
+    # Invites govern launcher access; the older list below governs map packs.
+    access=ttk.LabelFrame(parent,text='Convites individuais para baixar e jogar a versão de testes');access.pack(fill='x',pady=6)
+    form=ttk.Frame(access);form.pack(fill='x');label=tk.StringVar();days=tk.IntVar(value=30)
+    ttk.Label(form,text='Nome do tester:').pack(side='left');ttk.Entry(form,textvariable=label,width=22).pack(side='left')
+    ttk.Label(form,text='Validade (dias):').pack(side='left');ttk.Spinbox(form,from_=1,to=365,textvariable=days,width=5).pack(side='left')
+    invitations=ttk.Treeview(access,columns=('label','state'),show='headings',height=4);invitations.heading('label',text='Tester');invitations.heading('state',text='Acesso');invitations.pack(fill='x')
+    def access_done(value):
+        if 'invitation' in value:
+            # Selectable, never automatically copied or persisted in the panel.
+            dialog=tk.Toplevel(root);dialog.title('Convite — mostrado uma única vez');ttk.Label(dialog,text='Envie esta chave somente ao tester. Não será exibida novamente.').pack(padx=15,pady=12)
+            entry=ttk.Entry(dialog,width=48);entry.insert(0,value['invitation']);entry.pack(padx=15,pady=10);entry.selection_range(0,'end');entry.focus_set();ttk.Button(dialog,text='Fechar',command=dialog.destroy).pack(pady=10)
+        if 'invitations' in value:
+            for child in invitations.get_children():invitations.delete(child)
+            now=datetime.now().timestamp()
+            for row in value['invitations']:
+                state='Revogado' if row['revoked'] else 'Expirado' if row['expires']<=now else 'Ativado' if row['claimed'] else 'Aguardando resgate'
+                invitations.insert('','end',iid=row['id'],values=(row['label'],state))
+        if value.get('published'):status.set('Versão protegida publicada para os testers autorizados.')
+        if value.get('revoked'):status.set('Acesso revogado. A próxima validação será recusada.')
+    access_run=worker(root,status,token,manager,'tester',access_done)
+    controls=ttk.Frame(access);controls.pack(fill='x',pady=5)
+    def create():
+        try:validity=days.get()
+        except (ValueError,tk.TclError):status.set('Informe a validade em dias.');return
+        access_run(dict(action='create',label=label.get(),days=validity))
+    ttk.Button(controls,text='Gerar chave',command=create).pack(side='left');ttk.Button(controls,text='Listar convites',command=lambda:access_run(dict(action='list'))).pack(side='left',padx=4)
+    def revoke():
+        selected=invitations.selection()
+        if selected and messagebox.askyesno('Revogar acesso','Bloquear novas entradas e downloads deste tester?',parent=root):access_run(dict(action='revoke',id=selected[0]))
+    ttk.Button(controls,text='Revogar selecionado',command=revoke).pack(side='left')
+    def publish_protected():
+        name=filedialog.askopenfilename(parent=root,title='Publicação privada dos testers',initialdir=str(manager.ROOT/'.cache/testers'),filetypes=[('JSON','*.json')])
+        if not name:return
+        try:
+            from pathlib import Path
+            path=Path(name)
+            if path.stat().st_size>200000:raise ValueError('Arquivo grande demais')
+            payload=json.loads(path.read_text(encoding='utf-8'))
+            if messagebox.askyesno('Publicar testes','Liberar este pacote protegido para os testers com acesso ativo?',parent=root):access_run(dict(action='publish',payload=payload))
+        except (ValueError,OSError) as error:status.set('Arquivo inválido: '+str(error)[:120])
+    ttk.Button(controls,text='Publicar versão protegida',command=publish_protected).pack(side='left',padx=4)
     ttk.Label(parent,text='Somente as contas cadastradas podem consultar e baixar pacotes de teste.\nInforme os nicks online ou IDs das contas, um por linha. Trocar de nick nao remove a permissao.',wraplength=850).pack(anchor='w',pady=7)
     names=tk.Text(parent,height=4,wrap='word');names.pack(fill='x')
     packages={};table=ttk.Treeview(parent,columns=('title','channel'),show='tree headings',height=5,selectmode='browse')

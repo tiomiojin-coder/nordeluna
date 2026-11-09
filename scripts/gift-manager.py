@@ -39,7 +39,7 @@ def catalog(game=DEFAULT_GAME):
 
 
 def console_command(payload, service='gift'):
-    if service not in ('gift','content','update','notice','moderation'):raise ValueError('Servico administrativo invalido.')
+    if service not in ('gift','content','update','notice','moderation','tester'):raise ValueError('Servico administrativo invalido.')
     encoded=base64.b64encode(json.dumps(payload,ensure_ascii=False).encode()).decode('ascii')
     source=("import base64,json;from relay import Store;s=Store('data/relay.sqlite3')\n"
             "try:\n r=s."+service+"_admin(json.loads(base64.b64decode("+repr(encoded)+")))\n"

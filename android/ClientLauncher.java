@@ -27,6 +27,23 @@ public final class ClientLauncher extends Activity {
     private final android.os.Handler handler=new android.os.Handler(android.os.Looper.getMainLooper());
     private android.content.SharedPreferences prefs(){return getSharedPreferences(PREFS,MODE_PRIVATE);}
     private String ownChannel(){return getPackageName().endsWith(".testers")?"testers":"stable";}
+    private JSONObject testerRelease;
+    private static volatile long testerAllowedUntil;
+    private JSONObject testerCredentials()throws Exception{return new JSONObject(prefs().getString("tester_credentials","{}"));}
+    private void authorizeTester()throws Exception{
+        JSONObject result=TesterAccess.authorize(testerCredentials());testerRelease=result.optJSONObject("release");
+        testerAllowedUntil=android.os.SystemClock.elapsedRealtime()+15*60*1000;
+    }
+    private boolean inviteIfNeeded(){
+        if(!channel().equals("testers")||prefs().contains("tester_credentials"))return false;
+        activateTester();return true;
+    }
+    private void activateTester(){
+        EditText entry=new EditText(this);entry.setSingleLine(true);entry.setHint("NLT-...");entry.setInputType(129);
+        new AlertDialog.Builder(this).setTitle("Convite de tester").setMessage("Cole sua chave individual. Ela libera um aparelho e exige conexão para validar o acesso. Para trocar de aparelho, peça outro convite.").setView(entry)
+        .setPositiveButton("Ativar",(d,w)->work(()->{JSONObject credentials=TesterAccess.redeem(entry.getText().toString());prefs().edit().putString("tester_credentials",credentials.toString()).commit();authorizeTester();handler.post(()->status.setText("Acesso ativado. Use Atualizar para baixar a versão de testes."));}))
+        .setNeutralButton("Remover acesso local",(d,w)->{prefs().edit().remove("tester_credentials").apply();testerAllowedUntil=0;status.setText("Acesso removido deste aplicativo.");}).setNegativeButton("Voltar",null).show();
+    }
     private String channel(){return prefs().getString("channel",ownChannel());}
     private String selectedPackage(){return "com.tiomi.nordeluna"+(channel().equals("testers")?".testers":"");}
     private File state(){return new File(getFilesDir(),"client-launcher");}
@@ -38,13 +55,16 @@ public final class ClientLauncher extends Activity {
         if(gameRunning){super.onCreate(state);startActivity(new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));finish();return;}
         if(getIntent().getBooleanExtra("open_own_channel",false))prefs().edit().putString("channel",ownChannel()).apply();
         super.onCreate(state);getWindow().setStatusBarColor(Color.rgb(12,20,35));getWindow().setNavigationBarColor(Color.rgb(12,20,35));
+        String invited=getIntent().getStringExtra("tester_credentials");
+        if(ownChannel().equals("testers")&&invited!=null&&invited.length()<1024)prefs().edit().putString("tester_credentials",invited).commit();
         ScrollView scroll=new ScrollView(this);content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(28,24,28,28);content.setBackgroundColor(Color.rgb(12,20,35));scroll.addView(content);setContentView(scroll);
         TextView title=label("POKÉMON NORDELUNA",26);title.setTextColor(Color.rgb(112,224,231));
         label("Seu jogo, suas aventuras",15);channels=new Spinner(this);channels.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Estável","Testers · saves separados"}));channels.setSelection(channel().equals("testers")?1:0);content.addView(channels);
         channels.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int position,long id){if(busy)return;prefs().edit().putString("channel",position==1?"testers":"stable").apply();}});
         news=label("Confira as novidades antes de jogar. Sem internet? Você pode continuar offline.",16);
         button("JOGAR",()->play());button("Atualizar e ver novidades",()->checkUpdates(true));
-        button("Backups e restauração",()->showBackups());button("Tela, áudio e controles",()->settings());button("Diagnóstico e compatibilidade",()->diagnostics());
+        button("Reparar instalação",()->repairInstallation());button("Backups e restauração",()->showBackups());button("Tela, áudio e controles",()->settings());button("Diagnóstico e compatibilidade",()->diagnostics());
+        button("Acesso de tester / trocar convite",()->activateTester());
         status=label("Versão "+BuildConfig.VERSION_NAME+" • pronto para jogar",14);progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setMax(100);content.addView(progress);
         CrashDiagnostics.install(this,()->handler.post(()->{if(!isFinishing()&&CrashDiagnostics.hasUnseenReport(this))new AlertDialog.Builder(this).setTitle("O jogo foi interrompido").setMessage("Existe um diagnóstico do fechamento anterior. Você pode exportar um resumo sem saves ou dados de login.").setPositiveButton("Exportar",(d,w)->exportReport()).setNegativeButton("Depois",null).show();}));
         checkUpdates(getIntent().getBooleanExtra("check_update",false));
@@ -53,9 +73,11 @@ public final class ClientLauncher extends Activity {
     private void button(String text,Runnable action){Button b=new Button(this);b.setText(text);b.setAllCaps(false);b.setMinHeight(56);b.setFocusable(true);b.setOnClickListener(v->{if(!busy)action.run();});content.addView(b,new LinearLayout.LayoutParams(-1,-2));}
     private void work(Work task){if(busy)return;busy=true;channels.setEnabled(false);new Thread(()->{try{task.run();}catch(Exception error){handler.post(()->status.setText("Não foi possível concluir: "+error.getMessage()));}finally{handler.post(()->{busy=false;channels.setEnabled(true);});}},"Nordeluna launcher").start();}
     private void showProgress(String text,int percent){handler.post(()->{status.setText(text+" • "+percent+"%");progress.setProgress(percent);});}
-    private void play(){work(()->{
-        if(!channel().equals(ownChannel())){Intent open=getPackageManager().getLaunchIntentForPackage(selectedPackage());if(open==null)throw new IOException("Use Atualizar para instalar este canal. Seus saves serão separados do aplicativo estável.");open.putExtra("open_own_channel",true);handler.post(()->startActivity(open));return;}
-        migrateStable(this,gameFolder(this));saves().mkdirs();ClientFiles.backup(saves(),backups(),channel());
+    private void play(){if(inviteIfNeeded())return;work(()->{
+        if(channel().equals("testers"))authorizeTester();
+        if(ownChannel().equals("testers")&&(testerRelease==null||ClientFiles.verifyCatalog(testerRelease.getJSONObject("catalog").toString(),LauncherKeys.MODULUS).getJSONObject("channels").getJSONObject("testers").getJSONObject("android").getInt("code")!=BuildConfig.VERSION_CODE))throw new IOException("Use Atualizar para instalar a versão de testes autorizada.");
+        if(!channel().equals(ownChannel())){Intent open=getPackageManager().getLaunchIntentForPackage(selectedPackage());if(open==null)throw new IOException("Use Atualizar para instalar este canal. Seus saves serão separados do aplicativo estável.");open.putExtra("open_own_channel",true);if(channel().equals("testers"))open.putExtra("tester_credentials",testerCredentials().toString());handler.post(()->startActivity(open));return;}
+        ClientRepair.recover(gameFolder(this));migrateStable(this,gameFolder(this));saves().mkdirs();ClientFiles.backup(saves(),backups(),channel());
         handler.post(()->{startActivity(new Intent(this,MainActivity.class));});
     });}
     public static File gameFolder(Context c){File base=c.getExternalFilesDir(null);if(base==null)base=c.getFilesDir();return new File(base,"mkxp-z");}
@@ -67,11 +89,25 @@ public final class ClientLauncher extends Activity {
     }
     /** Called after bundled extraction, before the native/Ruby thread starts. */
     public static void prepareGame(Context c,File game)throws Exception{
+        ClientRepair.recover(game);
         android.content.SharedPreferences p=c.getSharedPreferences(PREFS,MODE_PRIVATE);migrateStable(c,game);String channel=c.getPackageName().endsWith(".testers")?"testers":"stable";
+        if(channel.equals("testers")&&android.os.SystemClock.elapsedRealtime()>testerAllowedUntil)throw new IOException("Abra pelo launcher e valide seu convite de tester.");
         File saves=new File(c.getFilesDir(),"player-data/"+channel);saves.mkdirs();JSONObject cfg=new JSONObject();cfg.put("channel",channel);cfg.put("save_root",saves.getAbsolutePath());cfg.put("volume",p.getInt("volume",80));
+        if(channel.equals("testers"))cfg.put("tester",new JSONObject(p.getString("tester_credentials","{}")));
         ClientFiles.write(new File(game,".nordeluna-launcher.json"),cfg.toString().getBytes(StandardCharsets.UTF_8));
     }
     public static File selectedSaves(Context c){String ch=c.getPackageName().endsWith(".testers")?"testers":"stable";return new File(c.getFilesDir(),"player-data/"+ch);}
+    private void repairInstallation(){
+        if(busy||gameRunning)return;
+        if(!channel().equals(ownChannel())){status.setText("Abra o outro canal para reparar a instalação dele.");return;}
+        if(getSharedPreferences("mkxpz_prefs",0).getInt("bundled_game_version",0)!=BuildConfig.VERSION_CODE){status.setText("Toque em Jogar uma vez para concluir a preparação desta versão do APK.");return;}
+        ProgressDialog dialog=new ProgressDialog(this);dialog.setTitle("Reparar instalação");dialog.setMessage("Conferindo arquivos sem alterar seus saves");dialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);dialog.setMax(100);dialog.setCancelable(false);dialog.show();
+        work(()->{try{
+            File game=gameFolder(this);ClientRepair.recover(game);ClientFiles.backup(saves(),backups(),channel());
+            int repaired=ClientRepair.repair(game,()->getAssets().open("nordeluna-game.zip"),(text,percent)->{showProgress(text,percent);handler.post(()->{dialog.setMessage(text);dialog.setProgress(percent);});});
+            handler.post(()->status.setText(repaired==0?"Instalação íntegra. Nenhum download necessário.":repaired+" arquivo(s) restaurado(s), sem baixar outro APK. Saves preservados."));
+        }finally{handler.post(()->dialog.dismiss());}});
+    }
     private void settings(){
         LinearLayout panel=new LinearLayout(this);panel.setOrientation(1);panel.setPadding(24,12,24,12);
         TextView vl=new TextView(this);vl.setText("Volume do jogo");panel.addView(vl);SeekBar volume=new SeekBar(this);volume.setMax(100);volume.setProgress(prefs().getInt("volume",80));panel.addView(volume);
@@ -83,8 +119,10 @@ public final class ClientLauncher extends Activity {
         ScrollView scroll=new ScrollView(this);scroll.addView(panel);
         new AlertDialog.Builder(this).setTitle("Antes de jogar").setView(scroll).setPositiveButton("Salvar",(d,w)->{String url=catalog.getText().toString().trim();if(!url.startsWith("https://")){status.setText("O catálogo precisa usar HTTPS.");return;}prefs().edit().putInt("volume",volume.getProgress()).putString("catalog",url).apply();getSharedPreferences("mkxpz_prefs",0).edit().putInt("display_mode",display.getSelectedItemPosition()).putInt("game_area_scale",area.getProgress()+50).putBoolean("touch_controls_enabled",virtual.isChecked()).putBoolean("auto_hide_touch_controls",hide.isChecked()).apply();status.setText("Preferências salvas. O editor de botões e teste Bluetooth continuam disponíveis na engrenagem durante o jogo.");}).setNegativeButton("Voltar",null).show();
     }
-    private void checkUpdates(boolean interactive){final String requestedChannel=channel();Work operation=()->{
-        JSONObject catalog=ClientFiles.catalog(prefs().getString("catalog",ClientFiles.DEFAULT_CATALOG),LauncherKeys.MODULUS);
+    private void checkUpdates(boolean interactive){if(interactive&&inviteIfNeeded())return;final String requestedChannel=channel();Work operation=()->{
+        JSONObject catalog;
+        if(channel().equals("testers")){authorizeTester();if(testerRelease==null)throw new IOException("Convite ativo. Aguarde a publicação da versão de testes.");catalog=ClientFiles.verifyCatalog(testerRelease.getJSONObject("catalog").toString(),LauncherKeys.MODULUS);}
+        else catalog=ClientFiles.catalog(prefs().getString("catalog",ClientFiles.DEFAULT_CATALOG),LauncherKeys.MODULUS);
         JSONObject channel=catalog.getJSONObject("channels").optJSONObject(channel());if(channel==null)throw new IOException("Ainda não existe versão publicada neste canal");
         JSONObject row=channel.optJSONObject("android");if(row==null)throw new IOException("Nenhuma atualização Android neste canal");
         int installed=0;try{installed=getPackageManager().getPackageInfo(selectedPackage(),0).versionCode;}catch(PackageManager.NameNotFoundException ignored){}
@@ -92,13 +130,15 @@ public final class ClientLauncher extends Activity {
         String compatibility="";JSONObject pc=channel.optJSONObject("windows");if(pc!=null&&!pc.optString("compatibility").equals(row.optString("compatibility")))compatibility="\nPC e Android publicados estão em versões online diferentes.";
         final String text=notes+compatibility;handler.post(()->{if(isFinishing()||gameRunning||!requestedChannel.equals(channel())||(!interactive&&busy))return;news.setText(text);status.setText(newer?"Atualização disponível: "+row.optString("version"):"Aplicativo atualizado • "+row.optString("version"));if(interactive&&newer)new AlertDialog.Builder(this).setTitle("Atualizar aplicativo completo?").setMessage(text+"\nO Android pedirá sua confirmação para instalar. Seus saves serão mantidos.").setPositiveButton("Baixar",(d,w)->{
             Intent other=!channel().equals(ownChannel())?getPackageManager().getLaunchIntentForPackage(selectedPackage()):null;
-            if(other!=null){other.putExtra("open_own_channel",true).putExtra("check_update",true);startActivity(other);}else downloadApk(row);
+            if(other!=null){other.putExtra("open_own_channel",true).putExtra("check_update",true);try{if(channel().equals("testers"))other.putExtra("tester_credentials",testerCredentials().toString());startActivity(other);}catch(Exception error){status.setText("Ative o convite de tester novamente.");}}else downloadApk(row);
         }).setNegativeButton("Depois",null).show();});
     };if(interactive)work(operation);else new Thread(()->{try{operation.run();}catch(Exception error){handler.post(()->{if(!isFinishing()&&!busy&&!gameRunning)status.setText("Sem novidades disponíveis agora. Você pode jogar offline.");});}},"Nordeluna news check").start();}
     private void downloadApk(JSONObject row){
         if(busy)return;final java.util.concurrent.atomic.AtomicBoolean cancelled=new java.util.concurrent.atomic.AtomicBoolean();
         ProgressDialog dialog=new ProgressDialog(this);dialog.setTitle("Atualizando Nordeluna");dialog.setMessage("Baixando "+(row.optLong("size")/1024/1024)+" MB");dialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);dialog.setMax(100);dialog.setCancelable(false);dialog.setButton(ProgressDialog.BUTTON_NEGATIVE,"Cancelar",(d,w)->cancelled.set(true));dialog.show();
-        work(()->{try{ClientFiles.backup(saves(),backups(),channel());File apk=ClientFiles.download(row,new File(getCacheDir(),"updates/Nordeluna.apk"),(text,percent)->{if(cancelled.get())throw new java.util.concurrent.CancellationException("Download cancelado");showProgress(text,percent);handler.post(()->dialog.setProgress(percent));});verifyApk(apk);if(cancelled.get())throw new java.util.concurrent.CancellationException("Download cancelado");pendingApk=apk;handler.post(()->{dialog.dismiss();installApk();});}finally{handler.post(()->dialog.dismiss());}});
+        work(()->{try{ClientFiles.backup(saves(),backups(),channel());File apk=ClientFiles.download(row,new File(getCacheDir(),"updates/Nordeluna.apk"),(text,percent)->{if(cancelled.get())throw new java.util.concurrent.CancellationException("Download cancelado");showProgress(text,percent);handler.post(()->dialog.setProgress(percent));});
+            if(channel().equals("testers")){authorizeTester();if(!row.optBoolean("encrypted")||testerRelease==null)throw new IOException("Use uma versão de testes protegida por convite");File plain=new File(getCacheDir(),"updates/Nordeluna-unlocked.apk");TesterAccess.unlock(apk,plain,row,testerRelease.getJSONObject("keys").getString("android"));if(!apk.delete()||!plain.renameTo(apk))throw new IOException("Não foi possível concluir o APK de testes");}
+            verifyApk(apk);if(cancelled.get())throw new java.util.concurrent.CancellationException("Download cancelado");pendingApk=apk;handler.post(()->{dialog.dismiss();installApk();});}finally{handler.post(()->dialog.dismiss());}});
     }
     @SuppressWarnings("deprecation") private void verifyApk(File apk)throws Exception{
         PackageManager manager=getPackageManager();PackageInfo candidate=manager.getPackageArchiveInfo(apk.getAbsolutePath(),PackageManager.GET_SIGNATURES),current=manager.getPackageInfo(getPackageName(),PackageManager.GET_SIGNATURES);

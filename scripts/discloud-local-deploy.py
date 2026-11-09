@@ -68,7 +68,7 @@ def expected_package(package):
     with zipfile.ZipFile(package) as archive:
         base_files={"main.py", "relay.py", "requirements.txt", "discloud.config"}
         content_files=base_files | {"gifts.py","economy.py","content.py","updates.py","content-key.json"}
-        if set(archive.namelist()) not in (base_files,base_files | {"gifts.py"},base_files | {"gifts.py","economy.py"},content_files,content_files | {"moderation.py"}) or archive.testzip():
+        if set(archive.namelist()) not in (base_files,base_files | {"gifts.py"},base_files | {"gifts.py","economy.py"},content_files,content_files | {"moderation.py"},content_files | {"testers.py"},content_files | {"moderation.py","testers.py"}) or archive.testzip():
             raise DeployError("O ZIP do servidor esta incompleto ou inclui arquivos inesperados.")
         tree = ast.parse(archive.read("relay.py").decode("utf-8"))
         values = {}
@@ -87,6 +87,8 @@ def expected_package(package):
             raise DeployError('O pacote de conteudo dinamico esta incompleto.')
         if values['REVISION']>=13 and 'moderation.py' not in archive.namelist():
             raise DeployError('O pacote de moderacao esta incompleto.')
+        if values['REVISION']>=14 and 'testers.py' not in archive.namelist():
+            raise DeployError('O pacote de acesso privado dos testers esta incompleto.')
         return values
 
 
@@ -113,7 +115,7 @@ def backup_stats(archive_path, destination):
             raise DeployError("Tabela de salas ausente no backup. Atualizacao cancelada.")
         stats={"rooms": db.execute("SELECT COUNT(*) FROM rooms").fetchone()[0],
                "accounts": db.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] if "accounts" in tables else 0}
-        for name in ('gifts','gift_claims','wallets','coin_ledger','shop_orders','economy_activity','daily_stats','battle_reports','community_events','community_members','cosmetic_preferences','content_revisions','update_chunks','update_packages','update_drafts','update_releases','update_testers','server_notices','moderation_owner','moderators','moderation_sanctions','moderation_audit','chat_history','moderation_state'):
+        for name in ('gifts','gift_claims','wallets','coin_ledger','shop_orders','economy_activity','daily_stats','battle_reports','community_events','community_members','cosmetic_preferences','content_revisions','update_chunks','update_packages','update_drafts','update_releases','update_testers','server_notices','moderation_owner','moderators','moderation_sanctions','moderation_audit','chat_history','moderation_state','tester_access','tester_catalog'):
             if name in tables:stats[name]=db.execute('SELECT COUNT(*) FROM '+name).fetchone()[0]
         return stats
 
@@ -135,7 +137,7 @@ def download_backup(url, output):
             stream.write(chunk)
 
 
-def deploy(token, package, notify):
+def deploy(token, package, notify, tester_release=None):
     expected = expected_package(package)
     client = Client(token)
     notify("Verificando acesso ao Discloud...", "authenticating")
@@ -201,14 +203,21 @@ def deploy(token, package, notify):
         # Read only numerical counts; no nick, Pokemon, account secret or room token is exported.
         command='python -c '+shlex.quote("import sqlite3,json;d=sqlite3.connect('file:data/relay.sqlite3?mode=ro',uri=True);"
             "tables={r[0] for r in d.execute(\"SELECT name FROM sqlite_master WHERE type='table'\")};"
-            "print(json.dumps({n:d.execute('SELECT COUNT(*) FROM '+n).fetchone()[0] for n in ('rooms','accounts','gifts','gift_claims','wallets','coin_ledger','shop_orders','economy_activity','daily_stats','battle_reports','community_events','community_members','cosmetic_preferences','content_revisions','update_chunks','update_packages','update_drafts','update_releases','update_testers','server_notices','moderation_owner','moderators','moderation_sanctions','moderation_audit','chat_history','moderation_state') if n in tables}))")
+            "print(json.dumps({n:d.execute('SELECT COUNT(*) FROM '+n).fetchone()[0] for n in ('rooms','accounts','gifts','gift_claims','wallets','coin_ledger','shop_orders','economy_activity','daily_stats','battle_reports','community_events','community_members','cosmetic_preferences','content_revisions','update_chunks','update_packages','update_drafts','update_releases','update_testers','server_notices','moderation_owner','moderators','moderation_sanctions','moderation_audit','chat_history','moderation_state','tester_access','tester_catalog') if n in tables}))")
         check = client.request(route + "/console", "PUT", json.dumps({"command": command}).encode(), "application/json")
         shell = check.get("apps", {}).get("shell", {})
         output = str(shell.get("stdout", ""))
         counts = next((json.loads(line) for line in reversed(output.splitlines()) if line.strip().startswith('{"rooms"')), None)
         if not isinstance(counts, dict) or any(counts.get(key, -1) < value for key, value in before.items()):
             raise DeployError("Servidor atualizado, mas a preservacao do banco precisa de verificacao. O backup local foi mantido; nenhum banco foi sobrescrito pelo atualizador.")
-        return {"app_id": app_id, "health": health, "database": counts, "backup": str(backup)}
+        if tester_release is not None:
+            notify("Publicando a versão protegida dos testers...", "publishing_testers")
+            import importlib.util
+            spec=importlib.util.spec_from_file_location('tester_publisher',ROOT/'scripts/gift-manager.py')
+            manager=importlib.util.module_from_spec(spec);spec.loader.exec_module(manager)
+            result=manager.send_admin(client,app_id,dict(action='publish',payload=tester_release),'tester')
+            if not result.get('published'):raise DeployError('Servidor atualizado, mas a publicacao privada dos testers nao foi confirmada.')
+        return {"app_id": app_id, "health": health, "database": counts, "backup": str(backup),"testers_published":tester_release is not None}
     except Exception:
         if was_online and not submitted:
             try:
@@ -227,10 +236,15 @@ def main():
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--package", type=Path, required=True)
+    parser.add_argument("--tester-release",type=Path,help="Publicacao privada local; nunca e incluida no ZIP publico")
     parser.add_argument("--status", type=Path, default=ROOT / ".cache/discloud-deploy/status.json")
     args = parser.parse_args()
     package = args.package.resolve()
     expected = expected_package(package)
+    tester_release=None
+    if args.tester_release:
+        if args.tester_release.stat().st_size>200000:raise DeployError('Publicacao privada grande demais.')
+        tester_release=json.loads(args.tester_release.read_text(encoding='utf-8'))
     events = queue.Queue()
     args.status.parent.mkdir(parents=True, exist_ok=True)
 
@@ -266,7 +280,7 @@ def main():
         def work():
             nonlocal busy
             try:
-                result = deploy(token, package, report)
+                result = deploy(token, package, report, tester_release)
                 report("Atualizacao concluida e verificada. Praca 39 configurada; banco preservado.", "complete", result=result)
             except Exception as error:
                 message = str(error).replace(token, "[token oculto]")

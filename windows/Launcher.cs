@@ -15,8 +15,8 @@ using System.Windows.Forms;
 using System.Web.Script.Serialization;
 
 namespace Nordeluna {
-static class Files {
-    public static readonly JavaScriptSerializer Json=new JavaScriptSerializer { MaxJsonLength=8*1024*1024 };
+static partial class Files {
+    public static readonly JavaScriptSerializer Json=new JavaScriptSerializer { MaxJsonLength=16*1024*1024 };
     public static Dictionary<string,object> Parse(string text){return Json.Deserialize<Dictionary<string,object>>(text);}
     public static Dictionary<string,object> Obj(object value){return (Dictionary<string,object>)value;}
     public static string Str(Dictionary<string,object> obj,string key,string fallback=""){return obj.ContainsKey(key)?Convert.ToString(obj[key]):fallback;}
@@ -36,24 +36,29 @@ static class Files {
     }
     public static byte[] Hex(string text){return Enumerable.Range(0,text.Length/2).Select(i=>Convert.ToByte(text.Substring(i*2,2),16)).ToArray();}
     public static Dictionary<string,object> Verify(string envelope){
-        var wrapper=Parse(envelope);string raw=Str(wrapper,"manifest"),signature=Str(wrapper,"signature");if(raw.Length>180000||!Regex.IsMatch(signature,"\\A[0-9a-f]{512}\\z"))throw new IOException("Catálogo inválido");
+        var data=VerifySigned(envelope,180000);if(Num(data,"schema")!=1)throw new IOException("Atualize o launcher");return data;
+    }
+    public static Dictionary<string,object> VerifySigned(string envelope,int limit){
+        var wrapper=Parse(envelope);string raw=Str(wrapper,"manifest"),signature=Str(wrapper,"signature");if(raw.Length>limit||!Regex.IsMatch(signature,"\\A[0-9a-f]{512}\\z"))throw new IOException("Documento assinado inválido");
         using(var rsa=new RSACryptoServiceProvider()){
             rsa.ImportParameters(new RSAParameters { Modulus=Hex(LauncherKeys.Modulus),Exponent=new byte[]{1,0,1} });
             if(!rsa.VerifyData(Encoding.UTF8.GetBytes(raw),CryptoConfig.MapNameToOID("SHA256"),Hex(signature)))throw new IOException("Assinatura da atualização inválida");
         }
-        var data=Parse(raw);if(Num(data,"schema")!=1)throw new IOException("Atualize o launcher");return data;
+        return Parse(raw);
     }
-    public static HttpWebResponse Open(string url){
+    public static HttpWebResponse Open(string url,long start=-1,long length=-1){
         for(int i=0;i<6;i++){
             Uri uri=new Uri(url);if(uri.Scheme!="https")throw new IOException("Use um endereço HTTPS");
             var req=(HttpWebRequest)WebRequest.Create(uri);req.AllowAutoRedirect=false;req.UserAgent="Nordeluna-Launcher/1.1";req.Timeout=15000;req.ReadWriteTimeout=30000;
+            if(start>=0){if(length<1)throw new IOException("Intervalo inválido");req.AddRange(start,start+length-1);}
             var response=(HttpWebResponse)req.GetResponse();int status=(int)response.StatusCode;
             if(status>=300&&status<400){url=new Uri(uri,response.Headers["Location"]).AbsoluteUri;response.Dispose();continue;}
-            if(status!=200){response.Dispose();throw new IOException("Servidor respondeu HTTP "+status);}return response;
+            if(start>=0){string range="bytes "+start+"-"+(start+length-1)+"/";if(status!=206||!(response.Headers["Content-Range"]??"").StartsWith(range,StringComparison.Ordinal)){response.Dispose();throw new IOException("O servidor não permite reparação parcial. Nenhum pacote completo foi baixado.");}}
+            else if(status!=200){response.Dispose();throw new IOException("Servidor respondeu HTTP "+status);}return response;
         }throw new IOException("Muitos redirecionamentos");
     }
-    public static string Catalog(string url){using(var response=Open(url))using(var input=response.GetResponseStream())using(var output=new MemoryStream()){
-        byte[] b=new byte[8192];int n;while((n=input.Read(b,0,b.Length))>0){if(output.Length+n>262144)throw new IOException("Catálogo grande demais");output.Write(b,0,n);}return Encoding.UTF8.GetString(output.ToArray());}}
+    public static string Catalog(string url,int limit=262144){using(var response=Open(url))using(var input=response.GetResponseStream())using(var output=new MemoryStream()){
+        byte[] b=new byte[8192];int n;while((n=input.Read(b,0,b.Length))>0){if(output.Length+n>limit)throw new IOException("Documento grande demais");output.Write(b,0,n);}return Encoding.UTF8.GetString(output.ToArray());}}
     public static string Download(Dictionary<string,object> row,string directory,Action<string,int> progress){
         Directory.CreateDirectory(directory);long size=Convert.ToInt64(row["size"]);string expected=Str(row,"sha256");if(size<1||size>3L*1024*1024*1024||!Regex.IsMatch(expected,"\\A[0-9a-f]{64}\\z"))throw new IOException("Pacote inválido");
         string path=Path.Combine(directory,"client.zip"),tmp=path+".part";
@@ -75,6 +80,7 @@ static class Files {
     public static void Recover(string game){
         string journal=Path.Combine(game,".launcher-update-journal.json");if(!File.Exists(journal))return;
         var data=Parse(Read(journal));string rollback=Child(game,Str(data,"rollback"));
+        foreach(object obj in (System.Collections.IEnumerable)data["files"]){var row=Obj(obj);string name=Str(row,"path");if(!RuntimePath(name))throw new IOException("Registro de recuperação inválido");if(Convert.ToBoolean(row["existed"])&&row.ContainsKey("sha256")&&Hash(Child(rollback,name))!=Str(row,"sha256"))throw new IOException("Backup de recuperação corrompido");}
         foreach(object obj in (System.Collections.IEnumerable)data["files"]){var row=Obj(obj);string name=Str(row,"path");if(!RuntimePath(name))throw new IOException("Registro de recuperação inválido");string target=Child(game,name),old=Child(rollback,name);
             if(Convert.ToBoolean(row["existed"])){if(!File.Exists(old))throw new IOException("Backup de recuperação incompleto");Directory.CreateDirectory(Path.GetDirectoryName(target));File.Copy(old,target,true);}else if(File.Exists(target))File.Delete(target);
         }
@@ -102,12 +108,7 @@ static class Files {
             int done=0;foreach(string name in paths){string target=Child(game,name);Directory.CreateDirectory(Path.GetDirectoryName(target));File.Copy(Child(stage,name),target,true);if(++done%200==0)progress("Aplicando arquivos",done*100/paths.Count);}
             foreach(string name in remove){string target=Child(game,name);if(File.Exists(target))File.Delete(target);}File.Delete(journal);
             // Keep one full-game recovery copy. Save snapshots have their own five-version history.
-            foreach(string old in Directory.GetDirectories(Path.Combine(game,".launcher"),"rollback-*")){
-                if(String.Equals(Path.GetFullPath(old),Path.GetFullPath(rollback),StringComparison.OrdinalIgnoreCase))continue;
-                if(!Regex.IsMatch(Path.GetFileName(old),"\\Arollback-[0-9a-f]{32}\\z")||(File.GetAttributes(old)&FileAttributes.ReparsePoint)!=0)continue;
-                string checkedPath=Child(game,".launcher/"+Path.GetFileName(old));
-                try{Directory.Delete(checkedPath,true);}catch(IOException){}catch(UnauthorizedAccessException){}
-            }
+            PruneRollback(game,rollback);
         }catch{Recover(game);throw;}
         finally{if(Directory.Exists(stage))Directory.Delete(stage,true);}
     }
@@ -141,7 +142,7 @@ static class Files {
     }
 }
 
-class Launcher : Form {
+partial class Launcher : Form {
     readonly string root=AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
     readonly string home=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Pokemon Nordeluna");
     const string DefaultCatalog="https://raw.githubusercontent.com/tiomiojin-coder/nordeluna/main/public/launcher/releases.json";
@@ -159,7 +160,7 @@ class Launcher : Form {
         layout.Controls.Add(new Label{Text="POKÉMON NORDELUNA",Font=new Font(Font.FontFamily,23,FontStyle.Bold),ForeColor=Color.FromArgb(112,224,231),Dock=DockStyle.Fill});
         channel=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,Width=250};channel.Items.AddRange(new object[]{"Estável","Testers · saves separados"});channel.SelectedIndex=Files.Str(preferences,"channel")=="testers"?1:0;channel.SelectedIndexChanged+=(s,e)=>{preferences["channel"]=Channel;Files.Save(SettingsPath,preferences);};layout.Controls.Add(channel);
         news=new TextBox{Multiline=true,ReadOnly=true,BorderStyle=BorderStyle.None,BackColor=Color.FromArgb(19,32,49),ForeColor=ForeColor,Dock=DockStyle.Fill,ScrollBars=ScrollBars.Vertical,Text="Bem-vindo a Nordeluna. Confira novidades e atualizações antes de jogar. Você também pode jogar offline."};layout.Controls.Add(news);
-        buttons=new FlowLayoutPanel{Dock=DockStyle.Fill,AutoScroll=true};layout.Controls.Add(buttons);Button("JOGAR",Play);Button("Atualizar",()=>CheckUpdates(true));Button("Backups",Backups);Button("Configurações",Settings);Button("Diagnóstico",Diagnostics);
+        buttons=new FlowLayoutPanel{Dock=DockStyle.Fill,AutoScroll=true};layout.Controls.Add(buttons);Button("JOGAR",Play);Button("Atualizar",()=>CheckUpdates(true));Button("Reparar",RepairInstallation);Button("Backups",Backups);Button("Configurações",Settings);Button("Diagnóstico",Diagnostics);Button("Trocar convite",ResetTester);
         status=new Label{Dock=DockStyle.Fill,Text="Pronto para jogar • launcher 1.1.1"};layout.Controls.Add(status);progress=new ProgressBar{Dock=DockStyle.Fill};layout.Controls.Add(progress);
         FormClosing+=(s,e)=>{if(busy||game!=null&&!game.HasExited){e.Cancel=true;MessageBox.Show("Finalize o jogo ou a atualização antes de fechar o launcher.");}};
         Shown+=async(s,e)=>{try{Files.Recover(root);string tester=Path.Combine(home,"channels/testers/game");if(Directory.Exists(tester))Files.Recover(tester);}catch(Exception ex){MessageBox.Show("Recuperação pendente: "+ex.Message);buttons.Enabled=false;return;}
@@ -171,24 +172,25 @@ class Launcher : Form {
     async Task Work(Func<Task> action){if(busy)return;busy=true;buttons.Enabled=false;channel.Enabled=false;try{await action();}catch(Exception ex){status.Text="Não foi possível concluir: "+ex.Message;}finally{busy=false;buttons.Enabled=true;channel.Enabled=true;}}
     void Progress(string text,int percent){BeginInvoke((Action)(()=>{status.Text=text+" • "+percent+"%";progress.Value=Math.Max(0,Math.Min(100,percent));}));}
     async Task CheckUpdates(bool interactive){string requestedChannel=Channel;Func<Task> operation=async()=>{
-        status.Text="Consultando novidades...";var catalog=await Task.Run(()=>Files.Verify(Files.Catalog(Files.Str(preferences,"catalog",DefaultCatalog))));
+        status.Text="Consultando novidades...";var catalog=await ChannelCatalog(interactive);
         if(IsDisposed||(!interactive&&busy)||requestedChannel!=Channel)return;
         var channels=Files.Obj(catalog["channels"]);if(!channels.ContainsKey(Channel))throw new IOException("Este canal ainda não tem uma versão publicada");var selected=Files.Obj(channels[Channel]);if(!selected.ContainsKey("windows"))throw new IOException("Nenhuma versão Windows neste canal");var row=Files.Obj(selected["windows"]);
         string local=Path.Combine(GameRoot,"installed-client.json");int code=File.Exists(local)?Files.Num(Files.Parse(Files.Read(local)),"code"):LauncherKeys.Code;
         news.Text=Files.Str(row,"notes","Sem notas de versão");if(selected.ContainsKey("android")&&Files.Str(Files.Obj(selected["android"]),"compatibility")!=Files.Str(row,"compatibility"))news.AppendText("\r\nAtenção: PC e Android publicados possuem versões online diferentes.");
         bool newer=Files.Num(row,"code")>code||!File.Exists(Path.Combine(GameRoot,"Game.exe"));status.Text=newer?"Atualização disponível: "+Files.Str(row,"version"):"Jogo atualizado";
-        if(interactive&&newer&&MessageBox.Show("Baixar e aplicar a versão "+Files.Str(row,"version")+"? O jogo deve permanecer fechado.","Atualização completa",MessageBoxButtons.YesNo)==DialogResult.Yes){string target=GameRoot,data=Data,backups=BackupDir,ch=Channel;await Task.Run(()=>{Files.Backup(data,backups,ch);string zip=Files.Download(row,Path.Combine(home,"downloads",ch),Progress);Files.Apply(zip,target,Progress);Files.Save(Path.Combine(target,"installed-client.json"),row);});status.Text="Atualização concluída. Pode jogar.";}
+        if(interactive&&(newer||Channel=="testers")&&MessageBox.Show((newer?"Baixar e aplicar a versão ":"Reinstalar a versão de testes ")+Files.Str(row,"version")+"? O jogo deve permanecer fechado.","Atualização completa",MessageBoxButtons.YesNo)==DialogResult.Yes){string target=GameRoot,data=Data,backups=BackupDir,ch=Channel;await Task.Run(()=>{Files.Backup(data,backups,ch);string zip=DownloadChannel(row,Path.Combine(home,"downloads",ch));if(ch=="testers")TesterAccess.Call(new Dictionary<string,object>{{"action","tester_access"},{"tester",testerCredentials}});Files.Apply(zip,target,Progress);Files.Save(Path.Combine(target,"installed-client.json"),row);});status.Text="Atualização concluída. Pode jogar.";}
     };if(interactive)await Work(operation);else try{await operation();}catch{if(!IsDisposed&&!busy)status.Text="Sem novidades disponíveis agora. Você pode jogar offline.";}}
     void Migrate(){if(Files.Saves(Path.Combine(home,"player-data/stable")).Any())return;string target=Path.Combine(home,"player-data/stable");
         foreach(string source in new[]{Path.Combine(root,"Saves"),Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),"Pokemon Nordeluna/Saves"),Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),"Pokemon Essentials v21.1/Saves")})foreach(string file in Files.Saves(source)){string to=Files.Child(target,file.Substring(source.Length).TrimStart('\\').Replace('\\','/'));Directory.CreateDirectory(Path.GetDirectoryName(to));if(!File.Exists(to))File.Copy(file,to);}}
     async Task Play(){await Work(async()=>{
         string target=GameRoot,data=Data,ch=Channel,backups=BackupDir;Files.EnsureClosed(target);Migrate();
-        if(!File.Exists(Path.Combine(target,"Game.exe"))&&ch=="testers"){
-            status.Text="Preparando cópia isolada para testers...";await Task.Run(()=>{var manifest=Files.Parse(Files.Read(Path.Combine(root,"pc-package.json")));foreach(string name in Files.Obj(manifest["files"]).Keys){if(!Files.RuntimePath(name))continue;string to=Files.Child(target,name);Directory.CreateDirectory(Path.GetDirectoryName(to));File.Copy(Files.Child(root,name),to,true);}Directory.CreateDirectory(target);File.Copy(Path.Combine(root,"pc-package.json"),Path.Combine(target,"pc-package.json"),true);});
+        if(ch=="testers"){
+            var approved=await ChannelCatalog(true);var approvedRow=Files.Obj(Files.Obj(Files.Obj(approved["channels"])["testers"])["windows"]);
+            string installed=Path.Combine(target,"installed-client.json");if(!File.Exists(installed)||Files.Num(Files.Parse(Files.Read(installed)),"code")!=Files.Num(approvedRow,"code"))throw new IOException("Use Atualizar para instalar a versão de testes autorizada.");
         }
         if(!File.Exists(Path.Combine(target,"Game.exe"))){status.Text="Use Atualizar para instalar o jogo neste canal.";return;}
         await Task.Run(()=>Files.Backup(data,backups,ch));Directory.CreateDirectory(data);
-        Files.Save(Path.Combine(target,".nordeluna-launcher.json"),new{ channel=ch,save_root=data,volume=Files.Num(preferences,"volume",80),settings_only=configureOnly });
+        Files.Save(Path.Combine(target,".nordeluna-launcher.json"),new{ channel=ch,save_root=data,volume=Files.Num(preferences,"volume",80),settings_only=configureOnly,tester=ch=="testers"?testerCredentials:null });
         string mkxp=Path.Combine(target,"mkxp.json");if(File.Exists(mkxp))Files.Write(mkxp,Files.Configure(Files.Read(mkxp),Files.Str(preferences,"fullscreen")=="True",Files.Num(preferences,"width",1024)));
         Files.Save(Path.Combine(home,"session.json"),new{ started=DateTime.UtcNow.ToString("o"),channel=ch });
         game=Process.Start(new ProcessStartInfo(Path.Combine(target,"Game.exe")){WorkingDirectory=target,UseShellExecute=false});status.Text="Jogo em execução • finalize-o para atualizar ou restaurar saves.";

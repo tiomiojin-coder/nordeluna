@@ -57,7 +57,12 @@ module NordelunaOnline
       LauncherExperience.channel=='testers' ? result+'-testers' : result
     end
     def request(url,data)
-      super
+      data=data.merge('channel'=>LauncherExperience.channel)
+      if LauncherExperience.channel=='testers'
+        raise Error,'O canal de testes exige o servidor oficial.' unless ['https://nordeluna-online.discloud.dev','https://nordeluna-online.discloud.dev/api'].include?(url)
+        data['tester']=LauncherExperience.config['tester']
+      end
+      super(url,data)
     rescue Error => error
       if error.message.match?(/versoes do jogo sao diferentes|Build.*incompativel/i)
         raise VersionMismatch,'PC e Android precisam da mesma versao do jogo e canal. Atualize antes de batalhar ou trocar.'

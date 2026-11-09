@@ -46,7 +46,9 @@ jobs:
           java-version: "11"
 
       - name: Validate Android packaging scripts
-        run: python3 -m unittest discover -s scripts/tests
+        run: |
+          python3 -m pip install cryptography==46.0.3
+          python3 -m unittest discover -s scripts/tests
 
       - name: Reconstruct private game archive
         run: |
@@ -60,7 +62,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg fluidsynth
+          sudo apt-get install -y --no-install-recommends ffmpeg fluidsynth ruby
           python3 scripts/prepare-android-archive.py \
             build-android/nordeluna-original.zip \
             build-android/nordeluna-utf8.zip \
@@ -150,39 +152,48 @@ jobs:
           test -n "$APK"
           unzip -l "$APK" | grep -F 'assets/nordeluna-game.zip'
           unzip -l "$APK" | grep -F 'lib/arm64-v8a/libmkxp-z.so'
-          cp "$APK" build-android/Nordeluna-Android-arm64-v1.14.apk
+          cp "$APK" build-android/Nordeluna-Android-arm64-v1.15.apk
           TESTERS="$(find build-android/mkxp-z/android/app/build/outputs/apk/beta/debug -name '*.apk' -type f -print -quit)"
           test -n "$TESTERS"
-          cp "$TESTERS" build-android/Nordeluna-Android-testers-arm64-v1.14.apk
-          sha256sum build-android/Nordeluna-Android-testers-arm64-v1.14.apk > build-android/Nordeluna-Android-testers-arm64-v1.14.apk.sha256
-          sha256sum build-android/Nordeluna-Android-arm64-v1.14.apk > build-android/Nordeluna-Android-arm64-v1.14.apk.sha256
-          ls -lh build-android/Nordeluna-Android-arm64-v1.14.apk
+          cp "$TESTERS" build-android/Nordeluna-Android-testers-arm64-v1.15.apk
+          sha256sum build-android/Nordeluna-Android-testers-arm64-v1.15.apk > build-android/Nordeluna-Android-testers-arm64-v1.15.apk.sha256
+          sha256sum build-android/Nordeluna-Android-arm64-v1.15.apk > build-android/Nordeluna-Android-arm64-v1.15.apk.sha256
+          ls -lh build-android/Nordeluna-Android-arm64-v1.15.apk
 
       - name: Verify Android launcher backups
         run: |
           JSON_JAR="$(find ~/.gradle/caches/modules-2/files-2.1/org.json/json -name '*.jar' -print -quit)"
           test -n "$JSON_JAR"
           mkdir -p build-android/launcher-tests
-          javac --release 8 -encoding UTF-8 -cp "$JSON_JAR" -d build-android/launcher-tests android/ClientFiles.java scripts/fixtures/ClientFilesTest.java
+          python3 scripts/tester-build-tools.py build-android/tester-fixture --fixture
+          javac --release 8 -encoding UTF-8 -cp "$JSON_JAR" -d build-android/launcher-tests android/ClientFiles.java android/ClientRepair.java android/TesterAccess.java scripts/fixtures/ClientFilesTest.java scripts/fixtures/ClientRepairTest.java scripts/fixtures/TesterAccessTest.java
           java -cp "build-android/launcher-tests:$JSON_JAR" ClientFilesTest "$(mktemp -d)"
+          java -cp "build-android/launcher-tests:$JSON_JAR" ClientRepairTest "$(mktemp -d)"
+          java -cp "build-android/launcher-tests:$JSON_JAR" TesterAccessTest build-android/tester-fixture
 
-      - name: Upload testers APK
+      - name: Protect testers APK before distribution
+        run: |
+          python3 -m pip install cryptography==46.0.3
+          python3 scripts/tester-build-tools.py build-android/Nordeluna-Android-testers-arm64-v1.15.apk build-android/Nordeluna-Android-testers-arm64-v1.15.apk.locked
+          rm build-android/Nordeluna-Android-testers-arm64-v1.15.apk build-android/Nordeluna-Android-testers-arm64-v1.15.apk.sha256
+
+      - name: Upload encrypted testers package
         uses: actions/upload-artifact@v4
         with:
-          name: Nordeluna-Android-testers-arm64-v1.14
+          name: Nordeluna-Android-testers-arm64-v1.15
           path: |
-            build-android/Nordeluna-Android-testers-arm64-v1.14.apk
-            build-android/Nordeluna-Android-testers-arm64-v1.14.apk.sha256
+            build-android/Nordeluna-Android-testers-arm64-v1.15.apk.locked
+            build-android/Nordeluna-Android-testers-arm64-v1.15.apk.locked.json
           compression-level: 0
           retention-days: 14
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Nordeluna-Android-arm64-v1.14
+          name: Nordeluna-Android-arm64-v1.15
           path: |
-            build-android/Nordeluna-Android-arm64-v1.14.apk
-            build-android/Nordeluna-Android-arm64-v1.14.apk.sha256
+            build-android/Nordeluna-Android-arm64-v1.15.apk
+            build-android/Nordeluna-Android-arm64-v1.15.apk.sha256
           compression-level: 0
           retention-days: 14
 
@@ -190,6 +201,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view android-1.14 --repo "$GITHUB_REPOSITORY" || gh release create android-1.14 --repo "$GITHUB_REPOSITORY" --title "Nordeluna Android 1.14" --notes-file docs/release-1.14.md
-          gh release upload android-1.14 build-android/Nordeluna-Android-arm64-v1.14.apk build-android/Nordeluna-Android-arm64-v1.14.apk.sha256 build-android/Nordeluna-Android-testers-arm64-v1.14.apk build-android/Nordeluna-Android-testers-arm64-v1.14.apk.sha256 --repo "$GITHUB_REPOSITORY" --clobber
+          gh release view android-1.15 --repo "$GITHUB_REPOSITORY" || gh release create android-1.15 --repo "$GITHUB_REPOSITORY" --title "Nordeluna Android 1.15" --notes-file docs/release-1.15.md
+          gh release upload android-1.15 build-android/Nordeluna-Android-arm64-v1.15.apk build-android/Nordeluna-Android-arm64-v1.15.apk.sha256 build-android/Nordeluna-Android-testers-arm64-v1.15.apk.locked build-android/Nordeluna-Android-testers-arm64-v1.15.apk.locked.json --repo "$GITHUB_REPOSITORY" --clobber
 

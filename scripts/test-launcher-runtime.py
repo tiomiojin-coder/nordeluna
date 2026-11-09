@@ -13,7 +13,7 @@ ruby.load_source('''
 module NordelunaOnline
   class VersionMismatch<Error;end
   def self.build;'compatible-pc-android';end
-  def self.request(*args);raise Error,'As versoes do jogo sao diferentes.';end
+  def self.request(*args);$launcher_request=args;raise Error,'As versoes do jogo sao diferentes.';end
   module ContentUpdates
     def self.mkdir(path);$ota_dirs[path]=true;end
     def self.write_json(path,data);File.binwrite(path,NordelunaOnline::JSON.dump(data));end
@@ -50,14 +50,21 @@ Game.save
 metadata=NordelunaOnline::JSON.parse($ota_files.fetch(File.join(stable,'launcher-save-info.json')))
 ota_check(metadata['play_seconds']==3723 && metadata['channel']=='stable','backup metadata missing')
 ota_check(NordelunaOnline.build=='compatible-pc-android','stable build changed')
-feature.instance_variable_set(:@config,{'channel'=>'testers','save_root'=>'C:/memory/profiles/testers'})
+feature.instance_variable_set(:@config,{'channel'=>'testers','save_root'=>'C:/memory/profiles/testers','tester'=>{'token'=>'fixture-token'}})
 ota_check(REInterface.save_directory!=stable,'tester saves share stable directory')
 ota_check(NordelunaOnline.build=='compatible-pc-android-testers','tester online isolation missing')
 begin
-  NordelunaOnline.request(nil,nil)
+  NordelunaOnline.request('https://nordeluna-online.discloud.dev',{})
   raise 'version mismatch accepted'
 rescue NordelunaOnline::VersionMismatch=>error
   ota_check(error.message.include?('PC e Android'),'compatibility warning unclear')
+end
+ota_check($launcher_request[1]['tester']=={'token'=>'fixture-token'} && $launcher_request[1]['channel']=='testers','tester proof missing from online request')
+begin
+  NordelunaOnline.request('https://other.example',{})
+  raise 'tester credentials sent to another server'
+rescue NordelunaOnline::Error=>error
+  ota_check(error.message.include?('servidor oficial'),'tester endpoint warning unclear')
 end
 ''','profile/save/options/compatibility assertions')
 print('PASS: actual Ruby launcher profiles, native save path, save metadata, volume and PC/Android compatibility warning')

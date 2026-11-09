@@ -17,3 +17,6 @@ __pycache__/
 _github-credential-query.txt
 *.apk
 *.apk.sha256
+.nordeluna-launcher.json
+tester-access.dat
+publicacao-testers.json

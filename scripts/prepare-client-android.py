@@ -12,7 +12,7 @@ ANDROID='{http://schemas.android.com/apk/res/android}'
 def prepare(engine):
     main=engine/'android/app/src/main'
     folder=main/'java/com/mkxpz/launcher';folder.mkdir(parents=True,exist_ok=True)
-    for name in ('ClientFiles.java','ClientLauncher.java','ClientUpdateProvider.java'):
+    for name in ('ClientFiles.java','ClientLauncher.java','ClientUpdateProvider.java','ClientRepair.java','TesterAccess.java'):
         shutil.copyfile(ROOT/'android'/name,folder/name)
     key=json.loads((ROOT/'server/content-key.json').read_text(encoding='utf-8'))['n']
     (folder/'LauncherKeys.java').write_text('package com.mkxpz.launcher; final class LauncherKeys { static final String MODULUS="'+key+'"; }',encoding='utf-8')

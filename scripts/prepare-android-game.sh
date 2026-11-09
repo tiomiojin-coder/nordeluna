@@ -26,6 +26,7 @@ unzip -q "$INPUT_ARCHIVE" -d "$GAME_DIR"
 test -f "$GAME_DIR/Game.ini"
 test -f "$GAME_DIR/Data/Scripts.rxdata"
 test -f "$GAME_DIR/soundfont.sf2"
+ruby "$SCRIPT_DIR/sync-launcher-plugin.rb" "$GAME_DIR" "$SCRIPT_DIR/../game-plugins/Nordeluna Online/031_LauncherExperience.rb"
 
 # The pinned Android mkxp-z build has no FluidSynth shared library. Render the
 # game's MIDI files with its own SoundFont so those tracks are not silent.

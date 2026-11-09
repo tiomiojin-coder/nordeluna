@@ -8,6 +8,8 @@ import os
 import tempfile
 import unicodedata
 import zipfile
+import importlib.util
+import json
 from pathlib import Path
 
 
@@ -27,6 +29,9 @@ def main() -> None:
     temporary = Path(temporary_name)
 
     try:
+        spec=importlib.util.spec_from_file_location('repair_index',Path(__file__).with_name('repair-index-tools.py'))
+        repair=importlib.util.module_from_spec(spec);spec.loader.exec_module(repair)
+        repair_manifest=repair.android_manifest(source)
         with zipfile.ZipFile(
             temporary,
             "w",
@@ -34,12 +39,15 @@ def main() -> None:
             compresslevel=6,
             allowZip64=True,
         ) as archive:
+            # First entry can be read cheaply from the signed APK's asset stream.
+            archive.writestr('client-repair.json',json.dumps(repair_manifest,ensure_ascii=False,separators=(',',':')))
             for path in sorted(source.rglob("*")):
                 if not path.is_file():
                     continue
                 name = unicodedata.normalize(
                     "NFC", path.relative_to(source).as_posix()
                 )
+                if name=='client-repair.json':continue
                 archive.write(path, name)
 
         with zipfile.ZipFile(temporary, "r") as check:

@@ -40,6 +40,7 @@ def package(subdomain, output, areas=None):
         archive.write(ROOT / "server/economy.py", "economy.py")
         archive.write(ROOT / "server/content.py", "content.py")
         archive.write(ROOT / "server/updates.py", "updates.py")
+        archive.write(ROOT / "server/testers.py", "testers.py")
         archive.write(ROOT / "server/moderation.py", "moderation.py")
         archive.write(ROOT / "server/content-key.json", "content-key.json")
         archive.write(ROOT / "server/requirements.txt", "requirements.txt")

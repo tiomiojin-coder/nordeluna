@@ -66,7 +66,11 @@ class UpdateService:
     def update_is_tester(self,request):
         if 'account' not in request:return False
         account=self.account(request)['id']
-        return bool(self.db.execute('SELECT 1 FROM update_testers WHERE account=?',(account,)).fetchone())
+        if self.db.execute('SELECT 1 FROM update_testers WHERE account=?',(account,)).fetchone():return True
+        if isinstance(request.get('tester'),dict):
+            _,bound=self.tester_auth(request['tester'])
+            return bound==account
+        return False
 
     def update_signing_key(self):
         return json.loads(Path(__file__).with_name('content-key.json').read_text(encoding='utf-8'))

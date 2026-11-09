@@ -25,11 +25,15 @@ def validate(data):
             if not isinstance(row.get('sha256'),str) or len(row['sha256'])!=64 or any(c not in '0123456789abcdef' for c in row['sha256']):raise ValueError('Hash invalido')
             if not isinstance(row.get('compatibility'),str) or not 1<=len(row['compatibility'])<=100:raise ValueError('Identidade online invalida')
             if not isinstance(row.get('notes'),str) or len(row['notes'])>6000:raise ValueError('Novidades grandes demais')
+            if 'repair' in row:
+                repair=row['repair']
+                if not isinstance(repair,dict):raise ValueError('Indice de reparacao invalido')
+                address=urllib.parse.urlparse(repair.get('url',''))
+                if address.scheme!='https' or not address.hostname or address.username or address.password or type(repair.get('size')) is not int or not 0<repair['size']<=16*1024*1024 or not isinstance(repair.get('sha256'),str) or len(repair['sha256'])!=64 or any(c not in '0123456789abcdef' for c in repair['sha256']):raise ValueError('Indice de reparacao invalido')
     return data
 
 
-def sign(data,private=None):
-    validate(data)
+def sign_payload(data,private=None):
     private=private or ROOT/'.cache/content-updates/private-key.json'
     key=json.loads(private.read_text(encoding='utf-8'))
     public=json.loads((ROOT/'server/content-key.json').read_text(encoding='utf-8'))
@@ -39,6 +43,11 @@ def sign(data,private=None):
     signature=f'{pow(int.from_bytes(block,"big"),int(key["d"],16),int(key["n"],16)):0512x}'
     verify_signature(raw,signature,public)
     return dict(manifest=raw,signature=signature)
+
+
+def sign(data,private=None):
+    validate(data)
+    return sign_payload(data,private)
 
 
 def row(path,url,version,code,compatibility,notes):

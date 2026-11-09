@@ -55,7 +55,7 @@ def integrate_pc_updates(output, copied, public):
     source = pc_update_source(path.read_text(encoding='utf-8'))
     changes={'028_ContentUpdates.rb':source}
     controls=output/'Plugins/Nordeluna Online/031_LauncherExperience.rb'
-    original=controls.read_text(encoding='utf-8')
+    original=(ROOT/'game-plugins/Nordeluna Online/031_LauncherExperience.rb').read_text(encoding='utf-8')
     old="""if NordelunaOnline::LauncherExperience.config['settings_only']==true && defined?(System) && System.respond_to?(:show_settings)
   System.show_settings
   exit
@@ -132,7 +132,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--game', type=Path, default=DEFAULT_GAME)
     parser.add_argument('--compiler', type=Path, default=ROOT / '.cache/inno/compiler/ISCC.exe')
-    parser.add_argument('--version', default='1.1.1')
+    parser.add_argument('--version', default='1.2.0')
     args = parser.parse_args()
     if not re.fullmatch(r'\d+\.\d+\.\d+(?:\.\d+)?', args.version):
         parser.error('Use uma versão numérica, como 1.0.0.')
@@ -154,6 +154,9 @@ def main():
             archive.write(staging/name,name)
         archive.write(staging/'pc-package.json','pc-package.json')
     full.with_suffix('.zip.sha256').write_text(digest(full)+'  '+full.name+'\n',encoding='ascii')
+    spec=importlib.util.spec_from_file_location('repair_index',ROOT/'scripts/repair-index-tools.py')
+    repair=importlib.util.module_from_spec(spec);spec.loader.exec_module(repair)
+    repair.build_index(full,Path(str(full)+'.repair.json'))
     print('Instalador pronto: ' + str(installer), flush=True)
 
 

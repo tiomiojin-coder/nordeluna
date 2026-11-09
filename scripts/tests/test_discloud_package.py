@@ -41,7 +41,7 @@ class DiscloudPackageTest(unittest.TestCase):
             root = Path(temporary)
             archive_path = builder.package("nordeluna-online", root / "server.zip")
             with zipfile.ZipFile(archive_path) as archive:
-                self.assertEqual(set(archive.namelist()), {"main.py", "relay.py", "gifts.py", "economy.py", "content.py", "updates.py", "moderation.py", "content-key.json", "discloud.config", "requirements.txt"})
+                self.assertEqual(set(archive.namelist()), {"main.py", "relay.py", "gifts.py", "economy.py", "content.py", "updates.py", "testers.py", "moderation.py", "content-key.json", "discloud.config", "requirements.txt"})
                 self.assertIn("ID=nordeluna-online", archive.read("discloud.config").decode())
                 archive.extractall(root / "app")
             with socket.socket() as probe:
@@ -63,8 +63,8 @@ class DiscloudPackageTest(unittest.TestCase):
                                 self.fail("Packaged server failed to start")
                             time.sleep(0.05)
                     self.assertEqual(health["protocol"], 1)
-                    self.assertEqual(health["version"], "0.10.0")
-                    self.assertEqual(health["revision"], 13)
+                    self.assertEqual(health["version"], "0.10.1")
+                    self.assertEqual(health["revision"], 14)
                     self.assertTrue(health["ok"])
                     self.assertTrue((root / "app/data/relay.sqlite3").is_file())
                 finally:

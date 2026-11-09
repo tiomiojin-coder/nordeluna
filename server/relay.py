@@ -17,16 +17,18 @@ try:
     from economy import EconomyService
     from updates import UpdateService
     from moderation import ModerationService, ModerationError, StaffAuthError
+    from testers import TesterService
 except ModuleNotFoundError:
     from server.gifts import GiftService
     from server.economy import EconomyService
     from server.updates import UpdateService
     from server.moderation import ModerationService, ModerationError, StaffAuthError
+    from server.testers import TesterService
 
 PROTOCOL = 1
-REVISION = 13
-VERSION = "0.10.0"
-FEATURES = ["friends", "invitations", "gifts", "luna_coins", "missions", "matchmaking", "community", "cosmetic_badges", "live_content", "content_updates", "tester_releases", "notices", "moderation"]
+REVISION = 14
+VERSION = "0.10.1"
+FEATURES = ["friends", "invitations", "gifts", "luna_coins", "missions", "matchmaking", "community", "cosmetic_badges", "live_content", "content_updates", "tester_releases", "tester_access", "notices", "moderation"]
 MAX_BODY = 262144
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 DEFAULT_AREAS = {"plaza": 39, "coliseum": None, "market": None}
@@ -54,7 +56,7 @@ def validate_rules(rules):
     return dict(rules)
 
 
-class Store(GiftService, EconomyService, UpdateService, ModerationService):
+class Store(GiftService, EconomyService, UpdateService, ModerationService, TesterService):
     validate_match_rules = staticmethod(validate_rules)
     def __init__(self, path, areas=None):
         self.lock = threading.RLock()
@@ -79,6 +81,7 @@ class Store(GiftService, EconomyService, UpdateService, ModerationService):
         self.setup_gifts()
         self.setup_economy()
         self.setup_updates()
+        self.setup_tester_access()
         self.setup_moderation()
         self.db.commit()
         self.areas = areas if areas is not None else json.loads(os.environ.get("NORDELUNA_ONLINE_AREAS", json.dumps(DEFAULT_AREAS)))
@@ -546,6 +549,9 @@ class Store(GiftService, EconomyService, UpdateService, ModerationService):
             return {"protocol": PROTOCOL, "revision": REVISION, "version": VERSION, "service": "Nordeluna Online", "areas": self.areas,
                     "features": FEATURES}
         with self.lock, self.db:
+            if action in ('tester_redeem','tester_access'):
+                return self.tester_action(request)
+            self.tester_require_request(request)
             if action in ('update_manifest','update_chunk'):
                 return self.update_action(request)
             if isinstance(action, str) and action.startswith('economy_'):
@@ -697,6 +703,9 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             require(0 < length <= MAX_BODY, "Pedido grande demais ou vazio.")
             body = json.loads(self.rfile.read(length))
+            if isinstance(body,dict) and body.get('action')=='tester_redeem' and not self.server.tester_limit(self.client_address[0]):
+                self.reply(429,dict(ok=False,error='Muitas tentativas. Aguarde um minuto.'))
+                return
             if self.path=='/moderation':
                 header=self.headers.get('Authorization','')
                 key=header[7:] if header.startswith('Bearer ') else ''
@@ -736,7 +745,19 @@ class RelayHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, *args, **kwargs):
         self.workers = threading.BoundedSemaphore(24)
+        self.tester_attempts={}
+        self.tester_rate_lock=threading.Lock()
         super().__init__(*args, **kwargs)
+
+    def tester_limit(self, address):
+        # Only invitation endpoints; gameplay is never rate-limited by this gate.
+        now=int(time.monotonic()//60)
+        with self.tester_rate_lock:
+            if len(self.tester_attempts)>4096:self.tester_attempts={k:v for k,v in self.tester_attempts.items() if v[0]==now}
+            old,count=self.tester_attempts.get(address,(now,0))
+            count=count+1 if old==now else 1
+            self.tester_attempts[address]=(now,count)
+            return count<=30
 
     def process_request(self, request, address):
         if not self.workers.acquire(blocking=False):
