@@ -72,12 +72,20 @@ check($area_calls.last['action']=='map_leave','refusal did not release server se
 identity=Marshal.load($area_files[SaveData::FILE_PATH])[:global_metadata].nordeluna_online_identity
 check(identity==NordelunaOnline::Identity.credentials,'persistent identity differs from registered account')
 
+# The selected save slot, rather than an unrelated Game.rxdata, must receive
+# all subsequent technical writes and the verified campaign return.
+standard_path=SaveData::FILE_PATH
+$area_files[REInterface.save_path(1)]=$area_files[standard_path].dup
+check(REInterface::MultiSave.load_from_slot(1),'fixture slot load failed')
+check(SaveData::FILE_PATH==REInterface.save_path(1),'online autosaves ignored the loaded slot')
+check(!REInterface::MultiSave.load_from_slot(2) && SaveData::FILE_PATH==REInterface.save_path(1),'failed slot load changed the active save target')
+
 # Yes: save is verified before transfer; moving between all three keeps anchor.
 $area_confirm<<true
 check(channel.connect('PRACA'),'plaza entry failed')
 original=areas.anchor.dup
 saved=Marshal.load($area_files[SaveData::FILE_PATH])
-check(saved[:position]==[42,15,22,8] && saved[:global_metadata].nordeluna_online_return==original,'original position not persisted before entry')
+check([saved[:map_factory].map.map_id,saved[:game_player].x,saved[:game_player].y,saved[:game_player].direction]==[42,15,22,8] && saved[:global_metadata].nordeluna_online_return==original,'original position not persisted before entry')
 check($game_map.map_id==1 && areas.active?,'player not inside plaza')
 check(! $game_player.through,'local player was made non-colliding')
 check(channel.connect('PRACA') && areas.anchor==original,'duplicate entry replaced campaign anchor')
@@ -101,6 +109,31 @@ token=channel.instance_variable_get(:@token)
   $scene.transfer_player
   check(areas.anchor==original && channel.instance_variable_get(:@token)==token,'area transition replaced anchor/session')
 end
+
+# Manual writes, both menu implementations and multi-slot saves are denied on
+# all three maps. Transaction receipts still persist at the campaign position.
+[1,5,6].each do |map|
+  $map_factory.setup(map);$game_map=$map_factory.map
+  before=$area_files[SaveData::FILE_PATH].dup
+  check(Game.save.equal?(false),'manual save accepted on an online map')
+  check(pbSaveScreen.equal?(false),'global save menu accepted online save')
+  check(PokemonSaveScreen.new.pbSaveScreen.equal?(false),'save screen accepted online save')
+  check(REInterface::MultiSave.save_to_slot(1).equal?(false),'multi-slot save accepted online save')
+  begin
+    SaveData.save_to_file(SaveData::FILE_PATH)
+    raise 'low-level writer bypassed online save block'
+  rescue IOError
+  end
+  check($area_files[SaveData::FILE_PATH]==before,'denied save changed the existing file')
+  $area_progress={'reward'=>map};areas.checked_save!
+  receipt=Marshal.load($area_files[SaveData::FILE_PATH])
+  check(receipt[:map_factory].map.map_id==42 && [receipt[:game_player].x,receipt[:game_player].y,receipt[:game_player].direction]==[15,22,8],'transaction persisted an online position')
+  check(receipt[:game_variables]['reward']==map && $game_map.map_id==map,'transaction lost progress or moved the live player')
+  NordelunaOnline.save_trade!
+  traded=Marshal.load($area_files[SaveData::FILE_PATH])
+  check(traded[:map_factory].map.map_id==42 && $game_map.map_id==map,'trade autosave persisted an online position or teleported the player')
+end
+check(($area_screen_calls || 0)==0 && ($area_global_screen_calls || 0)==0 && ($area_slot_calls || 0)==0,'save UI/slot implementation ran before the guard')
 
 # Same-tile visuals: pure sprites, interpolation, metadata cache, stale packets,
 # removal and correct nickname positioning. No events or player-through hacks.
@@ -159,8 +192,9 @@ check(!channel.active? && !areas.active?,'transport failure left online active')
 
 # Crash/load of a save made while online: recover before Game.load_map proceeds.
 $area_confirm<<true;channel.connect('PRACA')
-Game.save
-crashed=Marshal.load($area_files[SaveData::FILE_PATH])
+check(Game.save.equal?(false),'manual save accepted inside plaza')
+# A legacy save from an older release may still contain an online map.
+crashed=Marshal.load(Marshal.dump({global_metadata:$PokemonGlobal,map_factory:$map_factory,game_player:$game_player}))
 $PokemonGlobal=crashed[:global_metadata]
 $map_factory.setup(5);$game_map=$map_factory.map;$game_player.moveto(20,20)
 Game.load_map
@@ -177,5 +211,11 @@ $PokemonGlobal.nordeluna_online_server=original_server
 check(NordelunaOnline::Identity.credentials==first_identity,'switching servers lost original account identity')
 Game.start_new
 check($area_started_new && !channel.managed? && !areas.active?,'new game retained old online session')
+check(SaveData::FILE_PATH==standard_path,'new game retained the previous adventure save slot')
+$map_factory.setup(5);$game_map=$map_factory.map
+before=$area_files[SaveData::FILE_PATH].dup
+check(!Game.save,'online save accepted without a session/return anchor')
+rejects('technical save accepted without a safe return') {areas.checked_save!}
+check($area_files[SaveData::FILE_PATH]==before,'missing-anchor attempt damaged campaign save')
 
 'OK: areas accept/refuse, same-session plaza/coliseum/market, verified atomic save, disk failure rollback, transport drop, crash/load recovery, nonblocking ghost sprites, nicknames, interpolation and resource cleanup.'

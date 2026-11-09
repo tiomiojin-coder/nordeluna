@@ -49,9 +49,9 @@ class DiscloudDeployTests(unittest.TestCase):
 
     def test_package_and_backup_inspection(self):
         expected = deploy.expected_package(self.package)
-        self.assertEqual(expected["VERSION"], "0.10.1")
-        self.assertEqual(expected["REVISION"], 14)
-        self.assertEqual(expected["DEFAULT_AREAS"], dict(plaza=39, coliseum=None, market=None))
+        self.assertEqual(expected["VERSION"], "0.10.2")
+        self.assertEqual(expected["REVISION"], 15)
+        self.assertEqual(expected["DEFAULT_AREAS"], dict(plaza=39, coliseum=40, market=41))
         self.assertEqual(deploy.backup_stats(self.backup, self.root / "inspect.sqlite3"),
                          dict(rooms=1, accounts=0, **{name: 1 for name in MODERATION_TABLES}))
 
@@ -107,7 +107,7 @@ class DiscloudDeployTests(unittest.TestCase):
                 if route.endswith("/start"):raise deploy.DeployError("Discloud respondeu HTTP 409 em PUT start.")
                 return {"status":"ok"}
             def commit(self, app_id, package): calls.append(("COMMIT",app_id))
-        health = {"revision":14,"version":"0.10.1","areas":dict(plaza=39,coliseum=None,market=None)}
+        health = {"revision":15,"version":"0.10.2","areas":dict(plaza=39,coliseum=40,market=41)}
         def download(url,destination):destination.write_bytes(backup.read_bytes())
         with patch.object(deploy,"ROOT",self.root),patch.object(deploy,"Client",Client), \
              patch.object(deploy,"download_backup",download),patch.object(deploy.time,"sleep"), \

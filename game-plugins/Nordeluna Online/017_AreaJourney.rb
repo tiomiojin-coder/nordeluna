@@ -11,6 +11,60 @@ module NordelunaOnline
       def active?; !!@inside && !!anchor; end
       def busy?; !!@busy; end
       def saving?; !!@saving; end
+      def online_location?
+        !!($game_map && online_map?($game_map.map_id))
+      end
+      def save_notice
+        pbMessage(_INTL("Você só pode salvar fora da Praça Central, do Mercado Global e do Coliseu Lunar. Saia da área online e tente novamente."))
+        false
+      end
+
+      def select_save_slot(slot)
+        path = REInterface.save_path(slot)
+        raise IOError, "Caminho do slot invalido." unless path.is_a?(String) && !path.empty?
+        @default_save_path ||= SaveData::FILE_PATH
+        set_save_path(path)
+      end
+
+      def set_save_path(path)
+        return if SaveData::FILE_PATH == path
+        SaveData.send(:remove_const, :FILE_PATH)
+        SaveData.const_set(:FILE_PATH, path)
+      end
+
+      def reset_save_path
+        set_save_path(@default_save_path) if @default_save_path
+      end
+
+      def transaction_save
+        previous = @saving
+        raise Error, "Nao ha um retorno seguro da campanha. Saia da area online antes de continuar." if online_location? && !anchor
+        @saving = true
+        yield
+      ensure
+        @saving = previous
+      end
+
+      def campaign_save_hash(saved)
+        return saved unless online_location?
+        raise IOError, "Salvamento manual bloqueado nas areas online." unless saving? && anchor
+        validate_location(anchor, true)
+        # Reuse only trusted local campaign positioning. The deserialized objects
+        # are independent of the running map/player; no live teleport occurs.
+        previous = Marshal.load(File.binread(SaveData::FILE_PATH))
+        raise IOError, "O save anterior da campanha esta invalido." unless previous.is_a?(Hash)
+        factory, player = previous[:map_factory], previous[:game_player]
+        point = anchor
+        raise IOError, "O save anterior nao contem o retorno seguro da campanha." unless
+          factory && factory.respond_to?(:map) && factory.map && factory.map.map_id == point["map"] &&
+          player && [player.x, player.y, player.direction] == [point["x"], point["y"], point["direction"]]
+        saved[:map_factory], saved[:game_player] = factory, player
+        saved[:map_metadata] = previous[:map_metadata] if previous.key?(:map_metadata)
+        saved[:global_metadata].safesave = true if saved[:global_metadata].respond_to?(:safesave=)
+        saved
+      rescue TypeError, ArgumentError, EOFError, Error
+        raise IOError, "Nao foi possivel recuperar a posicao segura da campanha. O save anterior foi preservado."
+      end
 
       def guarded
         previous = @busy
@@ -194,6 +248,10 @@ module NordelunaOnline
 
   module AreaSaveWriter
     def save_to_file(path)
+      if Areas.online_location? && !Areas.saving?
+        Areas.save_notice
+        raise IOError, "Salvamento bloqueado: saia da area online."
+      end
       return super unless Areas.saving? || Areas.anchor
       temporary = path + ".online-tmp"
       backup = path + ".online-return.bak"
@@ -202,6 +260,10 @@ module NordelunaOnline
         saved = Marshal.load(File.binread(temporary))
         raise IOError, "Save sem ponto de retorno valido." unless saved.is_a?(Hash) &&
           saved[:global_metadata]&.nordeluna_online_return == Areas.anchor
+        if Areas.online_location?
+          saved = Areas.campaign_save_hash(saved)
+          File.binwrite(temporary, Marshal.dump(saved))
+        end
         if File.file?(path)
           File.binwrite(backup + ".tmp", File.binread(path))
           File.rename(backup + ".tmp", backup)
@@ -214,10 +276,57 @@ module NordelunaOnline
   end
   SaveData.singleton_class.prepend(AreaSaveWriter)
 
+  module AreaManualSaveGuard
+    def save(*args, **kwargs)
+      return Areas.save_notice if Areas.online_location? && !Areas.saving?
+      super
+    end
+  end
+  Game.singleton_class.prepend(AreaManualSaveGuard)
+
+  module AreaSaveScreenGuard
+    def pbSaveScreen(*args)
+      return Areas.save_notice if Areas.online_location?
+      super
+    end
+  end
+  Object.prepend(AreaSaveScreenGuard)
+  PokemonSaveScreen.prepend(AreaSaveScreenGuard) if defined?(PokemonSaveScreen)
+
+  module AreaSlotSaveGuard
+    def save_to_slot(*args)
+      return Areas.save_notice if Areas.online_location? && !Areas.saving?
+      result = super
+      Areas.select_save_slot(args[0]) if result
+      result
+    end
+
+    def load_from_slot(slot, *args)
+      previous = SaveData::FILE_PATH
+      Areas.select_save_slot(slot)
+      result = super
+      Areas.set_save_path(previous) unless result
+      result
+    rescue StandardError
+      Areas.set_save_path(previous) if previous
+      raise
+    end
+  end
+  REInterface::MultiSave.singleton_class.prepend(AreaSlotSaveGuard) if defined?(REInterface::MultiSave)
+
+  module AreaTradeSaveGuard
+    def save_trade!
+      return super unless Areas.online_location?
+      Areas.transaction_save { super }
+    end
+  end
+  singleton_class.prepend(AreaTradeSaveGuard)
+
   module AreaLoadRecovery
     def start_new
       MapChannel.abandon
       Areas.reset_runtime
+      Areas.reset_save_path
       Identity.reset_cache
       super
     end

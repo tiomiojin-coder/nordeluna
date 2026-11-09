@@ -3,10 +3,10 @@ class PokemonGlobalMetadata
 end
 
 module NordelunaOnline
-  # Only configured areas are enabled. Other map IDs remain pending.
+  # The three social maps share the same authenticated online session.
   PLAZA_MAP_ID = 39
-  COLISEUM_MAP_ID = nil
-  MARKET_MAP_ID = nil
+  COLISEUM_MAP_ID = 40
+  MARKET_MAP_ID = 41
   ONLINE_MAP_IDS = [PLAZA_MAP_ID, COLISEUM_MAP_ID, MARKET_MAP_ID].compact.freeze
   PLAZA_ENTRY = { :x => 34, :y => 59, :direction => 8 }.freeze
   NICK_FONT_SIZE = 18

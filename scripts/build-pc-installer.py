@@ -132,7 +132,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--game', type=Path, default=DEFAULT_GAME)
     parser.add_argument('--compiler', type=Path, default=ROOT / '.cache/inno/compiler/ISCC.exe')
-    parser.add_argument('--version', default='1.2.0')
+    parser.add_argument('--version', default='1.3.0')
     args = parser.parse_args()
     if not re.fullmatch(r'\d+\.\d+\.\d+(?:\.\d+)?', args.version):
         parser.error('Use uma versão numérica, como 1.0.0.')

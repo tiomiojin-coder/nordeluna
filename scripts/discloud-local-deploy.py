@@ -258,7 +258,7 @@ def main():
     root.minsize(590, 390)
     frame = ttk.Frame(root, padding=20); frame.pack(fill="both", expand=True)
     ttk.Label(frame, text="Atualizar o servidor Nordeluna", font=("Segoe UI", 17, "bold")).pack(anchor="w")
-    ttk.Label(frame, text=f'Aplicacao: {EXPECTED_APP}\nVersao: {expected["VERSION"]} / revisao {expected["REVISION"]}\nPraca: mapa 39. Atualiza a aplicacao existente e faz backup antes.\nConvites de testers: Android 1.15 / PC 1.2.0. Estavel continua publico.',
+    ttk.Label(frame, text=f'Aplicacao: {EXPECTED_APP}\nVersao: {expected["VERSION"]} / revisao {expected["REVISION"]}\nPraca: mapa 39. Atualiza a aplicacao existente e faz backup antes.\nAtualize o jogo junto com o servidor para habilitar os novos mapas.',
               wraplength=600).pack(anchor="w", pady=(10, 15))
     ttk.Label(frame, text="Token da API Discloud (somente nesta janela; nao sera salvo):").pack(anchor="w")
     entry = ttk.Entry(frame, show="*", width=70); entry.pack(fill="x", pady=8); entry.focus_set()

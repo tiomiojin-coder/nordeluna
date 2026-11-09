@@ -25,7 +25,7 @@ module REInterface
 end
 module SaveData;FILE_PATH='/legacy/Game.rxdata';end
 module Game
-  def self.save(*args);true;end
+  def self.save(*args,**kwargs);$launcher_save_options=kwargs;true;end
   def self.load(*args);true;end
 end
 class LauncherStats;def play_time;3723;end;end
@@ -47,6 +47,8 @@ ota_check(SaveData::FILE_PATH==File.join(stable,'Game.rxdata'),'native save path
 Game.load
 ota_check($PokemonSystem.bgmvolume==35 && $PokemonSystem.sevolume==35,'volume not applied on load')
 Game.save
+Game.save(safe:true)
+ota_check($launcher_save_options[:safe]==true,'launcher discarded native save keyword options')
 metadata=NordelunaOnline::JSON.parse($ota_files.fetch(File.join(stable,'launcher-save-info.json')))
 ota_check(metadata['play_seconds']==3723 && metadata['channel']=='stable','backup metadata missing')
 ota_check(NordelunaOnline.build=='compatible-pc-android','stable build changed')

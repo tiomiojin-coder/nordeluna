@@ -17,8 +17,8 @@ from updater_core import ROOT,GitHub,git,REPOSITORY
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--pc-tag',default='pc-1.2.0');parser.add_argument('--android-tag',default='android-1.15')
-    parser.add_argument('--pc-code',type=int,default=120);parser.add_argument('--android-code',type=int,default=22)
+    parser.add_argument('--pc-tag',default='pc-1.3.0');parser.add_argument('--android-tag',default='android-1.16')
+    parser.add_argument('--pc-code',type=int,default=130);parser.add_argument('--android-code',type=int,default=23)
     parser.add_argument('--pc-commit');parser.add_argument('--android-commit')
     parser.add_argument('--stable-only',action='store_true',help='Publicar somente o catalogo estavel')
     parser.add_argument('--publish',action='store_true');args=parser.parse_args()
@@ -46,7 +46,7 @@ def main():
             crc=0
             for name in ('species','moves','abilities','items','types','trainer_types'):crc=zlib.crc32(game.read('Data/'+name+'.dat'),crc)
     meta={'compatibility':build+'-'+str(crc)}
-    notes=(ROOT/'docs/release-1.15.md').read_text(encoding='utf-8')
+    notes=(ROOT/'docs/release-1.16.md').read_text(encoding='utf-8')
     def row(release,pattern,code,compat):
         matches=[asset for asset in release['assets'] if re.fullmatch(pattern,asset['name'])]
         if len(matches)!=1:raise ValueError('Nao foi encontrado exatamente um pacote: '+pattern)

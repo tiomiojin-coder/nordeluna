@@ -20,7 +20,18 @@ module SaveData
   FILE_PATH='area-save.rxdata'
   def self.save_to_file(path)
     File.binwrite(path,Marshal.dump({global_metadata:$PokemonGlobal,
-      position:[$game_map.map_id,$game_player.x,$game_player.y,$game_player.direction]}))
+      map_factory:$map_factory,game_player:$game_player,game_variables:($area_progress || {})}))
+  end
+end
+class PokemonSaveScreen
+  def pbSaveScreen; $area_screen_calls=($area_screen_calls || 0)+1;Game.save;end
+end
+def pbSaveScreen; $area_global_screen_calls=($area_global_screen_calls || 0)+1;Game.save;end
+module REInterface
+  def self.save_path(slot);"area-save-slot#{slot}.rxdata";end
+  module MultiSave
+    def self.save_to_slot(slot);$area_slot_calls=($area_slot_calls || 0)+1;true;end
+    def self.load_from_slot(slot);slot!=2;end
   end
 end
 module Game

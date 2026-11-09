@@ -26,12 +26,12 @@ except ModuleNotFoundError:
     from server.testers import TesterService
 
 PROTOCOL = 1
-REVISION = 14
-VERSION = "0.10.1"
+REVISION = 15
+VERSION = "0.10.2"
 FEATURES = ["friends", "invitations", "gifts", "luna_coins", "missions", "matchmaking", "community", "cosmetic_badges", "live_content", "content_updates", "tester_releases", "tester_access", "notices", "moderation"]
 MAX_BODY = 262144
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-DEFAULT_AREAS = {"plaza": 39, "coliseum": None, "market": None}
+DEFAULT_AREAS = {"plaza": 39, "coliseum": 40, "market": 41}
 
 
 class ProtocolError(Exception):

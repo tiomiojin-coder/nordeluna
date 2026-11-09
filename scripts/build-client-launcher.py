@@ -7,7 +7,7 @@ import subprocess
 from updater_core import ROOT
 
 
-def build(output, code=120):
+def build(output, code=130):
     output.mkdir(parents=True, exist_ok=True)
     modulus=json.loads((ROOT/'server/content-key.json').read_text(encoding='utf-8'))['n']
     key=ROOT/'build/launcher/LauncherKeys.cs';key.parent.mkdir(parents=True,exist_ok=True)
@@ -21,5 +21,5 @@ def build(output, code=120):
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,default=ROOT/'build/launcher');parser.add_argument('--code',type=int,default=120)
+    parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,default=ROOT/'build/launcher');parser.add_argument('--code',type=int,default=130)
     args=parser.parse_args();print(build(args.output,args.code))

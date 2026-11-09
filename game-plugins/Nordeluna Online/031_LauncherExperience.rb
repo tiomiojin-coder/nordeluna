@@ -79,12 +79,12 @@ module NordelunaOnline
   LauncherExperience.migrate_legacy
   REInterface.singleton_class.prepend(LauncherSaveDirectory) if defined?(REInterface)
   module LauncherSaveMetadata
-    def save(*args)
+    def save(*args, **kwargs)
       result=super
       LauncherExperience.metadata if result
       result
     end
-    def load(*args)
+    def load(*args, **kwargs)
       result=super
       LauncherExperience.apply_options
       result
