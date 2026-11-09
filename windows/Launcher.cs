@@ -103,7 +103,7 @@ static class Files {
             foreach(string name in remove){string target=Child(game,name);if(File.Exists(target))File.Delete(target);}File.Delete(journal);
             // Keep one full-game recovery copy. Save snapshots have their own five-version history.
             foreach(string old in Directory.GetDirectories(Path.Combine(game,".launcher"),"rollback-*")){
-                if(String.Equals(old,rollback,StringComparison.OrdinalIgnoreCase))continue;
+                if(String.Equals(Path.GetFullPath(old),Path.GetFullPath(rollback),StringComparison.OrdinalIgnoreCase))continue;
                 if(!Regex.IsMatch(Path.GetFileName(old),"\\Arollback-[0-9a-f]{32}\\z")||(File.GetAttributes(old)&FileAttributes.ReparsePoint)!=0)continue;
                 string checkedPath=Child(game,".launcher/"+Path.GetFileName(old));
                 try{Directory.Delete(checkedPath,true);}catch(IOException){}catch(UnauthorizedAccessException){}
