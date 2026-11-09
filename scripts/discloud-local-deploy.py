@@ -242,9 +242,6 @@ def main():
     package = args.package.resolve()
     expected = expected_package(package)
     tester_release=None
-    if args.tester_release:
-        if args.tester_release.stat().st_size>200000:raise DeployError('Publicacao privada grande demais.')
-        tester_release=json.loads(args.tester_release.read_text(encoding='utf-8'))
     events = queue.Queue()
     args.status.parent.mkdir(parents=True, exist_ok=True)
 
@@ -261,7 +258,7 @@ def main():
     root.minsize(590, 390)
     frame = ttk.Frame(root, padding=20); frame.pack(fill="both", expand=True)
     ttk.Label(frame, text="Atualizar o servidor Nordeluna", font=("Segoe UI", 17, "bold")).pack(anchor="w")
-    ttk.Label(frame, text=f'Aplicacao: {EXPECTED_APP}\nVersao: {expected["VERSION"]} / revisao {expected["REVISION"]}\nPraca: mapa 39. Atualiza a aplicacao existente e faz backup antes.\nOs novos menus, cartoes e estados exigem o cliente {expected["VERSION"]}.',
+    ttk.Label(frame, text=f'Aplicacao: {EXPECTED_APP}\nVersao: {expected["VERSION"]} / revisao {expected["REVISION"]}\nPraca: mapa 39. Atualiza a aplicacao existente e faz backup antes.\nConvites de testers: Android 1.15 / PC 1.2.0. Estavel continua publico.',
               wraplength=600).pack(anchor="w", pady=(10, 15))
     ttk.Label(frame, text="Token da API Discloud (somente nesta janela; nao sera salvo):").pack(anchor="w")
     entry = ttk.Entry(frame, show="*", width=70); entry.pack(fill="x", pady=8); entry.focus_set()
@@ -271,7 +268,13 @@ def main():
     busy = False
 
     def start():
-        nonlocal busy
+        nonlocal busy,tester_release
+        if args.tester_release:
+            try:
+                if args.tester_release.stat().st_size>200000:raise DeployError('Publicacao privada grande demais.')
+                tester_release=json.loads(args.tester_release.read_text(encoding='utf-8'))
+            except (OSError,ValueError,DeployError):
+                progress.set('Aguarde: as builds e a assinatura da publicacao privada ainda precisam terminar.');return
         token = entry.get().strip()
         if not token:
             progress.set("Cole seu token no campo acima."); return
@@ -295,7 +298,7 @@ def main():
         while not events.empty():
             progress.set(events.get())
         if not busy:
-            entry.configure(state="normal"); button.configure(state="normal")
+            entry.configure(state="normal"); button.configure(state="normal" if not args.tester_release or args.tester_release.is_file() else "disabled")
         root.after(150, poll)
     def close():
         if busy:
@@ -303,7 +306,7 @@ def main():
         else:
             root.destroy()
     root.protocol("WM_DELETE_WINDOW", close)
-    report("Aguardando o token na janela local.", "waiting_for_token")
+    report("Aguardando o token na janela local. O botao sera liberado quando a publicacao privada estiver pronta.", "waiting_for_token")
     poll()
     root.mainloop()
 
