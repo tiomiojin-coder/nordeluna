@@ -17,7 +17,7 @@ from updater_core import ROOT,GitHub,git
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--pc-tag',default='pc-1.1.1');parser.add_argument('--android-tag',default='android-1.14')
-    parser.add_argument('--pc-code',type=int,default=111);parser.add_argument('--android-code',type=int,default=21)
+    parser.add_argument('--pc-code',type=int,default=112);parser.add_argument('--android-code',type=int,default=21)
     parser.add_argument('--pc-commit');parser.add_argument('--android-commit')
     parser.add_argument('--publish',action='store_true');args=parser.parse_args()
     client=GitHub();repo=client.get('')

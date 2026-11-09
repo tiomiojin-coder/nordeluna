@@ -101,6 +101,13 @@ static class Files {
             string updates=Path.Combine(game,".nordeluna-updates");if(Directory.Exists(updates))Directory.Move(updates,Path.Combine(rollback,"content-state"));
             int done=0;foreach(string name in paths){string target=Child(game,name);Directory.CreateDirectory(Path.GetDirectoryName(target));File.Copy(Child(stage,name),target,true);if(++done%200==0)progress("Aplicando arquivos",done*100/paths.Count);}
             foreach(string name in remove){string target=Child(game,name);if(File.Exists(target))File.Delete(target);}File.Delete(journal);
+            // Keep one full-game recovery copy. Save snapshots have their own five-version history.
+            foreach(string old in Directory.GetDirectories(Path.Combine(game,".launcher"),"rollback-*")){
+                if(String.Equals(old,rollback,StringComparison.OrdinalIgnoreCase))continue;
+                if(!Regex.IsMatch(Path.GetFileName(old),"\\Arollback-[0-9a-f]{32}\\z")||(File.GetAttributes(old)&FileAttributes.ReparsePoint)!=0)continue;
+                string checkedPath=Child(game,".launcher/"+Path.GetFileName(old));
+                try{Directory.Delete(checkedPath,true);}catch(IOException){}catch(UnauthorizedAccessException){}
+            }
         }catch{Recover(game);throw;}
         finally{if(Directory.Exists(stage))Directory.Delete(stage,true);}
     }
