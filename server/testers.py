@@ -94,8 +94,8 @@ class TesterService:
             value=request.get(field)
             if isinstance(value,dict):protected=protected or str(value.get('build','')).endswith('-testers')
         if not protected and request.get('code'):
-            room=self.db.execute('SELECT data FROM rooms WHERE code=?',(str(request['code'])[:16],)).fetchone()
-            if room:protected=str(json.loads(room[0]).get('build','')).endswith('-testers')
+            room=self.db.execute("SELECT json_extract(data,'$.build') FROM rooms WHERE code=?",(str(request['code'])[:16],)).fetchone()
+            if room:protected=str(room[0]).endswith('-testers')
         if not protected:
             token=request.get('token');presence=self.presence.get(token) if isinstance(token,str) else None
             protected=bool(presence and str(presence.get('build','')).endswith('-testers'))
@@ -108,4 +108,4 @@ class TesterService:
             if row:
                 current=self.account(request)['id']
                 check(account is None or account==current,'Este convite pertence a outra conta online.')
-                self.db.execute('UPDATE tester_access SET account=? WHERE id=? AND account IS NULL',(current,identity))
+                if account is None:self.db.execute('UPDATE tester_access SET account=? WHERE id=? AND account IS NULL',(current,identity))
