@@ -84,6 +84,10 @@ module NordelunaOnline
       def buy(item)
         return recover_purchase if pending
         return pbMessage(_INTL('Este produto esta indisponivel no momento. Nenhuma moeda foi cobrada.')) if item['enabled']==false
+        Gifts.validate_rewards(item['rewards'])
+        if item['rewards'].any? { |row| row['kind']=='outfit' && Wardrobe.owned.include?(row['id']) }
+          return pbMessage(_INTL('Voce ja possui esta roupa. Nenhuma moeda foi cobrada.'))
+        end
         return unless ShopPreview.open(item,@snapshot['balance'])==:buy
         raise Error,'Recupere primeiro o presente pendente.' if Gifts.pending
         old=pending

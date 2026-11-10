@@ -37,6 +37,8 @@ def rewards_data(value):
             result.append(dict(kind=kind, id=identifier(row.get("id")), quantity=number(row.get("quantity"), 1, 999)))
         elif kind == "money":
             result.append(dict(kind=kind, amount=number(row.get("amount"), 1, 9999999)))
+        elif kind == "outfit":
+            result.append(dict(kind=kind, id=identifier(row.get("id"))))
         elif kind == "pokemon":
             check(type(row.get("shiny", False)) is bool, "Shiny deve ser verdadeiro ou falso.")
             gift = dict(kind=kind, species=identifier(row.get("species")), level=number(row.get("level"), 1, 100),

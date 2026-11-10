@@ -55,6 +55,7 @@ internal static class WindowsHttpBridge {
     }
     static void Execute(string file) {
         string id = Path.GetFileNameWithoutExtension(file), response, stage = "read-request";
+        bool completed = false;
         try {
             if (new FileInfo(file).Length > 263168 || File.Exists(Path.Combine(folder, id + ".cancel"))) throw new IOException("Cancelled/large request");
             string request = File.ReadAllText(file, utf8);
@@ -72,6 +73,9 @@ internal static class WindowsHttpBridge {
             http.Method = "POST"; http.AllowAutoRedirect = false; http.Timeout = 5000; http.ReadWriteTimeout = 5000;
             http.ContentType = "application/json; charset=utf-8"; http.Accept = "application/json";
             http.UserAgent = "Nordeluna-Windows/OnlineBridge-1"; http.ContentLength = body.Length;
+            http.KeepAlive = true;
+            http.ServicePoint.Expect100Continue = false;
+            http.ServicePoint.UseNagleAlgorithm = false;
             lock (gate) { active = http; activeId = id; started = uptime.ElapsedMilliseconds; }
             using (Stream output = http.GetRequestStream()) output.Write(body, 0, body.Length);
             stage = "receive";
@@ -81,13 +85,14 @@ internal static class WindowsHttpBridge {
             using (result) {
                 string text = utf8.GetString(ReadLimited(result.GetResponseStream(), 524288));
                 response = ((int)result.StatusCode) + "\n" + text;
+                completed = true;
                 Diagnostic("http=" + ((int)result.StatusCode) + " ms=" + (uptime.ElapsedMilliseconds - started));
             }
         } catch (Exception error) {
             Diagnostic("network-error " + error.GetType().Name + " stage=" + stage + " code=" + error.HResult);
             response = "ERROR\nConexao interrompida ou servidor sem resposta. Verifique a internet e tente novamente.";
         } finally {
-            lock (gate) { if (active != null) active.Abort(); active = null; }
+            lock (gate) { if (active != null && !completed) active.Abort(); active = null; }
             try { File.Delete(file); } catch { }
         }
         try {
@@ -110,17 +115,27 @@ internal static class WindowsHttpBridge {
             session = Guid.NewGuid().ToString();
             Marker("session", session); Marker("status", "1");
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+            using (AutoResetEvent requestReady = new AutoResetEvent(false))
+            using (FileSystemWatcher watcher = new FileSystemWatcher(folder, "*.request"))
             using (Timer watch = new Timer(Watch, null, 0, 200)) {
+                watcher.NotifyFilter = NotifyFilters.FileName;
+                watcher.Created += delegate { try { requestReady.Set(); } catch (ObjectDisposedException) { } };
+                watcher.Renamed += delegate { try { requestReady.Set(); } catch (ObjectDisposedException) { } };
+                watcher.EnableRaisingEvents = true;
+                long lastCleanup = 0;
                 while (running && ParentAlive()) {
                     foreach (string file in Directory.GetFiles(folder, "*.request")) {
                         if (Regex.IsMatch(Path.GetFileName(file), @"^[0-9a-f]{32}\.request$")) Execute(file);
                         if (!running) break;
                     }
-                    foreach (string old in Directory.GetFiles(folder)) {
+                    if (uptime.ElapsedMilliseconds - lastCleanup >= 30000) {
+                      lastCleanup = uptime.ElapsedMilliseconds;
+                      foreach (string old in Directory.GetFiles(folder)) {
                         if (Regex.IsMatch(Path.GetFileName(old), @"^[0-9a-f]{32}\.(request|response|cancel|writing)$") &&
                                 DateTime.UtcNow - File.GetLastWriteTimeUtc(old) > TimeSpan.FromSeconds(30)) File.Delete(old);
+                      }
                     }
-                    Thread.Sleep(50);
+                    requestReady.WaitOne(250); // periodic fallback if a file notification is lost
                 }
             }
         } catch (Exception error) { if (log != null) Diagnostic("broker-error " + error.GetType().Name); }

@@ -38,13 +38,16 @@ module NordelunaOnline
       # A foreground request never races the map worker. Only transport runs in
       # the worker; all Graphics/Input/JSON and sprite work stays on the main thread.
       def drain
-        return unless @worker
-        while @worker.alive?
+        acquired = false
+        return if @draining || !@worker
+        @draining = acquired = true
+        ticket = @worker
+        while @worker.equal?(ticket) && ticket.alive?
           check_timeout
           Graphics.update
           Input.update
         end
-        collect
+        collect if @worker.equal?(ticket)
       rescue StandardError => error
         @worker.cancel if @worker
         @worker = nil
@@ -53,6 +56,8 @@ module NordelunaOnline
         @queued = @sent_emote = nil
         dispose_bubbles
         # A failed social channel must not prevent a foreground PvP/trade request.
+      ensure
+        @draining = false if acquired
       end
 
       def check_timeout
@@ -193,7 +198,7 @@ module NordelunaOnline
       end
 
       def update
-        return if @updating
+        return if @updating || @draining
         @updating = true
         begin
           check_timeout
@@ -233,6 +238,10 @@ module NordelunaOnline
   module MapNetworkGate
     def request(url, data)
       MapChannel.drain
+      if data.is_a?(Hash) && %w[map_update map_ping map_enter map_leave].include?(data['action'])
+        token = data['token']
+        raise MapSessionExpired, "A sessao online foi encerrada. Entre novamente na sala." unless token.is_a?(String) && !token.empty?
+      end
       super
     end
     def configure_nickname

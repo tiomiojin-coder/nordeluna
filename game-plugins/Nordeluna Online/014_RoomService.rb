@@ -12,6 +12,19 @@ module NordelunaOnline
       @server_diagnostic ||= {}
       %w[version revision protocol].each { |key| @server_diagnostic[key] = reply[key] if reply.key?(key) }
       @server_diagnostic["latency_ms"] = latency if latency
+      if latency.is_a?(Numeric) && latency.finite? && latency.between?(0,60000)
+        @latency_samples=[] if @latency_server!=server
+        @latency_server=server
+        @latency_samples=((@latency_samples || [])+[latency]).last(20)
+        @server_diagnostic['latency_average_ms']=(@latency_samples.sum.to_f/@latency_samples.length).round
+        @server_diagnostic['latency_samples']=@latency_samples.length
+        @server_diagnostic['latency_range_ms']=(@latency_samples.max-@latency_samples.min).round
+      end
+      processing=reply['server_ms']
+      @server_diagnostic.delete('server_ms')
+      if processing.is_a?(Numeric) && processing.finite? && processing.between?(0,60000)
+        @server_diagnostic['server_ms']=processing.round(2)
+      end
     end
 
     def diagnostic_snapshot
@@ -129,6 +142,10 @@ module NordelunaOnline
       @worker.cancel if @worker
       @worker = nil
       @token = nil
+      if error.is_a?(MapSessionExpired)
+        @resume_token = nil
+        @outbox = nil if @outbox && @outbox[:attempted]
+      end
       @error = error.message
       NordelunaOnline.record_online_error(error, "map_room")
       if @desired && !@suspended
@@ -208,16 +225,22 @@ module NordelunaOnline
 
     def drain
       return super unless managed?
-      if @worker
-        while @worker.alive?
-          raise ConnectionLost, "Servidor sem resposta." if NordelunaOnline.now >= @worker_deadline
+      acquired = false
+      return if @draining
+      @draining = acquired = true
+      ticket, deadline = @worker, @worker_deadline
+      if ticket
+        while @worker.equal?(ticket) && ticket.alive?
+          raise ConnectionLost, "Servidor sem resposta." if NordelunaOnline.now >= deadline
           Graphics.update
           Input.update
         end
-        collect
+        collect if @worker.equal?(ticket)
       end
     rescue StandardError => error
       connection_failed(error)
+    ensure
+      @draining = false if acquired
     end
 
     def collect
@@ -231,6 +254,7 @@ module NordelunaOnline
       reply = JSON.parse(raw)
       unless reply.is_a?(Hash) && reply["ok"] == true
         message = reply.is_a?(Hash) ? reply["error"].to_s : "Resposta de sala invalida."
+        raise MapSessionExpired, "A sessao online expirou. Entre novamente na sala." if NordelunaOnline.map_session_expired?(message)
         if message.match?(/Espere 2|Mensagem:|ID de mensagem/)
           @outbox = nil
           @notice = "Mensagem nao enviada: #{message}"
@@ -292,7 +316,7 @@ module NordelunaOnline
 
     def update
       return super unless managed?
-      return if @updating
+      return if @updating || @draining
       @updating = true
       begin
         if @worker

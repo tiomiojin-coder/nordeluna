@@ -14,7 +14,8 @@ module NordelunaOnline
         Areas.checked_save!
         saved=Marshal.load(File.binread(SaveData::FILE_PATH))[:global_metadata]
         raise Error,'O resgate nao foi confirmado no save.' unless saved &&
-          saved.nordeluna_gift_pending==pending && saved.nordeluna_gift_receipts==$PokemonGlobal.nordeluna_gift_receipts
+          saved.nordeluna_gift_pending==pending && saved.nordeluna_gift_receipts==$PokemonGlobal.nordeluna_gift_receipts &&
+          saved.nordeluna_owned_outfits==$PokemonGlobal.nordeluna_owned_outfits
       end
       def identifier(value)
         raise Error,'ID de recompensa invalido.' unless value.is_a?(String) && value.match?(/\A[A-Z][A-Z0-9_]{0,63}\z/)
@@ -33,6 +34,7 @@ module NordelunaOnline
             raise VersionMismatch,'Este item nao existe nesta versao do jogo.' unless GameData::Item.exists?(identifier(row['id']))
             integer(row['quantity'],1,999)
           when 'money' then integer(row['amount'],1,9999999)
+          when 'outfit' then Wardrobe.validate!(identifier(row['id']).to_s)
           when 'pokemon'
             species=identifier(row['species']);form=integer(row['form'],0,999)
             raise VersionMismatch,'Esta especie nao existe nesta versao do jogo.' unless GameData::Species.exists?(species)
@@ -70,6 +72,7 @@ module NordelunaOnline
           case row['kind']
           when 'item' then "#{row['quantity']}x #{GameData::Item.get(row['id']).name}"
           when 'money' then "$ #{row['amount']}"
+          when 'outfit' then "Roupa: #{Wardrobe.definition(row['id'])[:name]}"
           else "#{row['egg'] ? 'Ovo de ' : ''}#{GameData::Species.get_species_form(row['species'],row['form']).name} / Nv. #{row['level']}#{row['shiny'] ? ' / Shiny' : ''}"
           end
         end
@@ -117,6 +120,8 @@ module NordelunaOnline
           when 'money'
             money+=row['amount']
             raise Error,'O dinheiro ultrapassaria o limite. Gaste um pouco e recupere o presente.' if money>Settings::MAX_MONEY
+          when 'outfit'
+            Wardrobe.validate!(row['id'])
           when 'pokemon'
             pokemon=PokemonCodec.decode(row['pokemon'])
             if row['egg']
@@ -159,11 +164,13 @@ module NordelunaOnline
         raise Error,'O recibo retornado nao corresponde ao presente.' unless remote['id']==ticket['claim']['id'] && remote['rewards']==ticket['claim']['rewards']
         raise Error,'Este resgate ja foi confirmado. Use o save original.' if remote['state']=='delivered'
         old_party=$player.party.dup;old_bag=$bag;old_money=$player.money;old_receipts=receipts
+        old_outfits=$PokemonGlobal.nordeluna_owned_outfits
         old_dex=$player.respond_to?(:pokedex) ? $player.pokedex : nil
         occupied=[]
         receipt={'id'=>remote['id'],'title'=>remote['title'],'url'=>NordelunaOnline.server,'time'=>Time.now.to_i,'acked'=>false}
         begin
           $bag=bag;$player.money=money
+          ticket['plan'].each { |row| Wardrobe.unlock(row['id']) if row['kind']=='outfit' }
           $player.instance_variable_set(:@pokedex,Marshal.load(Marshal.dump(old_dex))) if old_dex
           pokes.each do |pokemon|
             if old_dex && !pokemon.egg?
@@ -183,6 +190,7 @@ module NordelunaOnline
           save!
         rescue StandardError
           $player.party.replace(old_party);$bag=old_bag;$player.money=old_money
+          $PokemonGlobal.nordeluna_owned_outfits=old_outfits
           $player.instance_variable_set(:@pokedex,old_dex) if old_dex
           occupied.each { |box,slot| $PokemonStorage[box,slot]=nil }
           $PokemonGlobal.nordeluna_gift_receipts=old_receipts

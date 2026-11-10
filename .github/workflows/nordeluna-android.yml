@@ -26,7 +26,7 @@ env:
   MKXP_Z_COMMIT: 17a5ec6cb3e8d2de05a82451bc4910f36517d322
   REFERENCE_APK_URL: https://codeberg.org/warmwinter/mkxp-z/releases/download/uranium-android@0.2.0/uranium-0.2.0.apk
   REFERENCE_APK_SHA256: 4a520f7784f1f7e3493c9970da0748a483a0f88400627bcc6a705529c1407653
-  GAME_ARCHIVE_SHA256: c8ad358f5d791485c6283fe51e802e3290d6ef55007c0bed71e53bc4b107637a
+  GAME_ARCHIVE_SHA256: 525d6b7ebceb79648716edcd58747344a8c58a65e56f34996e55c188c91ecf40
 
 jobs:
   build:
@@ -152,13 +152,13 @@ jobs:
           test -n "$APK"
           unzip -l "$APK" | grep -F 'assets/nordeluna-game.zip'
           unzip -l "$APK" | grep -F 'lib/arm64-v8a/libmkxp-z.so'
-          cp "$APK" build-android/Nordeluna-Android-arm64-v1.16.apk
+          cp "$APK" build-android/Nordeluna-Android-arm64-v1.16.1.apk
           TESTERS="$(find build-android/mkxp-z/android/app/build/outputs/apk/beta/debug -name '*.apk' -type f -print -quit)"
           test -n "$TESTERS"
-          cp "$TESTERS" build-android/Nordeluna-Android-testers-arm64-v1.16.apk
-          sha256sum build-android/Nordeluna-Android-testers-arm64-v1.16.apk > build-android/Nordeluna-Android-testers-arm64-v1.16.apk.sha256
-          sha256sum build-android/Nordeluna-Android-arm64-v1.16.apk > build-android/Nordeluna-Android-arm64-v1.16.apk.sha256
-          ls -lh build-android/Nordeluna-Android-arm64-v1.16.apk
+          cp "$TESTERS" build-android/Nordeluna-Android-testers-arm64-v1.16.1.apk
+          sha256sum build-android/Nordeluna-Android-testers-arm64-v1.16.1.apk > build-android/Nordeluna-Android-testers-arm64-v1.16.1.apk.sha256
+          sha256sum build-android/Nordeluna-Android-arm64-v1.16.1.apk > build-android/Nordeluna-Android-arm64-v1.16.1.apk.sha256
+          ls -lh build-android/Nordeluna-Android-arm64-v1.16.1.apk
 
       - name: Verify Android launcher backups
         run: |
@@ -174,26 +174,26 @@ jobs:
       - name: Protect testers APK before distribution
         run: |
           python3 -m pip install cryptography==46.0.3
-          python3 scripts/tester-build-tools.py build-android/Nordeluna-Android-testers-arm64-v1.16.apk build-android/Nordeluna-Android-testers-arm64-v1.16.apk.locked
-          rm build-android/Nordeluna-Android-testers-arm64-v1.16.apk build-android/Nordeluna-Android-testers-arm64-v1.16.apk.sha256
+          python3 scripts/tester-build-tools.py build-android/Nordeluna-Android-testers-arm64-v1.16.1.apk build-android/Nordeluna-Android-testers-arm64-v1.16.1.apk.locked
+          rm build-android/Nordeluna-Android-testers-arm64-v1.16.1.apk build-android/Nordeluna-Android-testers-arm64-v1.16.1.apk.sha256
 
       - name: Upload encrypted testers package
         uses: actions/upload-artifact@v4
         with:
-          name: Nordeluna-Android-testers-arm64-v1.16
+          name: Nordeluna-Android-testers-arm64-v1.16.1
           path: |
-            build-android/Nordeluna-Android-testers-arm64-v1.16.apk.locked
-            build-android/Nordeluna-Android-testers-arm64-v1.16.apk.locked.json
+            build-android/Nordeluna-Android-testers-arm64-v1.16.1.apk.locked
+            build-android/Nordeluna-Android-testers-arm64-v1.16.1.apk.locked.json
           compression-level: 0
           retention-days: 14
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Nordeluna-Android-arm64-v1.16
+          name: Nordeluna-Android-arm64-v1.16.1
           path: |
-            build-android/Nordeluna-Android-arm64-v1.16.apk
-            build-android/Nordeluna-Android-arm64-v1.16.apk.sha256
+            build-android/Nordeluna-Android-arm64-v1.16.1.apk
+            build-android/Nordeluna-Android-arm64-v1.16.1.apk.sha256
           compression-level: 0
           retention-days: 14
 
@@ -201,6 +201,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view android-1.16 --repo "$GITHUB_REPOSITORY" || gh release create android-1.16 --repo "$GITHUB_REPOSITORY" --title "Nordeluna Android 1.16" --notes-file docs/release-1.16.md
-          gh release upload android-1.16 build-android/Nordeluna-Android-arm64-v1.16.apk build-android/Nordeluna-Android-arm64-v1.16.apk.sha256 build-android/Nordeluna-Android-testers-arm64-v1.16.apk.locked build-android/Nordeluna-Android-testers-arm64-v1.16.apk.locked.json --repo "$GITHUB_REPOSITORY" --clobber
+          gh release view android-1.16.1 --repo "$GITHUB_REPOSITORY" || gh release create android-1.16.1 --repo "$GITHUB_REPOSITORY" --title "Nordeluna Android 1.16.1" --notes-file docs/release-1.16.1.md
+          gh release upload android-1.16.1 build-android/Nordeluna-Android-arm64-v1.16.1.apk build-android/Nordeluna-Android-arm64-v1.16.1.apk.sha256 build-android/Nordeluna-Android-testers-arm64-v1.16.1.apk.locked build-android/Nordeluna-Android-testers-arm64-v1.16.1.apk.locked.json --repo "$GITHUB_REPOSITORY" --clobber
 

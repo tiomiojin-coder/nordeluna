@@ -26,9 +26,9 @@ except ModuleNotFoundError:
     from server.testers import TesterService
 
 PROTOCOL = 1
-REVISION = 15
-VERSION = "0.10.2"
-FEATURES = ["friends", "invitations", "gifts", "luna_coins", "missions", "matchmaking", "community", "cosmetic_badges", "live_content", "content_updates", "tester_releases", "tester_access", "notices", "moderation"]
+REVISION = 17
+VERSION = "0.10.5"
+FEATURES = ["friends", "invitations", "gifts", "luna_coins", "missions", "matchmaking", "community", "cosmetic_badges", "live_content", "content_updates", "tester_releases", "tester_access", "notices", "moderation", "wardrobe"]
 MAX_BODY = 262144
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 DEFAULT_AREAS = {"plaza": 39, "coliseum": 40, "market": 41}
@@ -683,12 +683,33 @@ class Store(GiftService, EconomyService, UpdateService, ModerationService, Teste
 
 
 class Handler(BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
     def setup(self):
         super().setup()
-        self.connection.settimeout(15)
+        self.connection.settimeout(3)
         self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self.persistent_slot = False
+        self.served_count = 0
+
+    def finish(self):
+        try:
+            super().finish()
+        finally:
+            if self.persistent_slot:
+                self.server.keepalive_slots.release()
+                self.persistent_slot = False
+
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except (ConnectionResetError, BrokenPipeError):
+            self.close_connection=True
 
     def do_GET(self):
+        self.processing_started=time.perf_counter()
+        if self.headers.get('Transfer-Encoding') or self.headers.get('Content-Length','0')!='0':
+            self.close_connection=True
+            return self.reply(400,dict(ok=False,error='GET nao aceita corpo.'))
         if self.path.split("?", 1)[0] == "/health":
             self.reply(200, {"ok": True, "service": "Nordeluna Online", "protocol": PROTOCOL, "revision": REVISION, "version": VERSION,
                              "areas": self.server.store.areas, "features": FEATURES})
@@ -696,13 +717,28 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(404, {"ok": False, "error": "Rota desconhecida."})
 
     def do_POST(self):
+        self.processing_started=None
         if self.path not in ("/api","/moderation"):
+            self.close_connection=True
             self.reply(404, {"ok": False, "error": "Rota desconhecida."})
             return
         try:
+            # Persistent connections must never interpret an unread body as the
+            # next request. Reject ambiguous framing and close on body errors.
+            if self.headers.get('Transfer-Encoding') or len(self.headers.get_all('Content-Length',[]))!=1:
+                self.close_connection=True
+                return self.reply(400,dict(ok=False,error='Content-Length unico obrigatorio.'))
             length = int(self.headers.get("Content-Length", "0"))
-            require(0 < length <= MAX_BODY, "Pedido grande demais ou vazio.")
-            body = json.loads(self.rfile.read(length))
+            if not 0 < length <= MAX_BODY:
+                self.close_connection=True
+                return self.reply(400,dict(ok=False,error='Pedido grande demais ou vazio.'))
+            self.connection.settimeout(15)
+            raw=self.rfile.read(length)
+            if len(raw)!=length:
+                self.close_connection=True
+                return self.reply(400,dict(ok=False,error='Pedido incompleto.'))
+            body = json.loads(raw)
+            self.processing_started=time.perf_counter()
             if isinstance(body,dict) and body.get('action')=='tester_redeem' and not self.server.tester_limit(self.client_address[0]):
                 self.reply(429,dict(ok=False,error='Muitas tentativas. Aguarde um minuto.'))
                 return
@@ -717,21 +753,34 @@ class Handler(BaseHTTPRequestHandler):
         except ModerationError as exc:
             self.reply(400,{"ok":False,"error":str(exc)[:240],"code":exc.code,"until":exc.until})
         except (ProtocolError, ValueError, UnicodeError, RecursionError) as exc:
+            if self.processing_started is None:self.close_connection=True
             self.reply(400, {"ok": False, "error": str(exc)[:160]})
         except Exception:
+            self.close_connection=True
             self.reply(500, {"ok": False, "error": "Erro interno do relay."})
 
     def reply(self, status, body):
+        started=getattr(self,'processing_started',None)
+        if started is not None:body=dict(body,server_ms=round((time.perf_counter()-started)*1000,2))
         raw = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        self.served_count+=1
+        slots=getattr(self.server,'keepalive_slots',None)
+        if not self.close_connection and not self.persistent_slot and slots:
+            self.persistent_slot=slots.acquire(blocking=False)
+        if not self.persistent_slot or self.served_count>=16:self.close_connection=True
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header('Connection','close' if self.close_connection else 'keep-alive')
+        if not self.close_connection:self.send_header('Keep-Alive','timeout=3, max='+str(16-self.served_count))
         self.end_headers()
         try:
             self.wfile.write(raw)
         except (BrokenPipeError, ConnectionResetError):
-            pass
+            self.close_connection=True
+        finally:
+            self.connection.settimeout(3)
 
     def log_message(self, fmt, *args):
         # No bearer tokens or Pokemon in logs.
@@ -745,6 +794,9 @@ class RelayHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, *args, **kwargs):
         self.workers = threading.BoundedSemaphore(24)
+        # Only eight of 24 workers may wait on a reusable connection; the rest
+        # remain available for new players, actions and hosting health probes.
+        self.keepalive_slots = threading.BoundedSemaphore(8)
         self.tester_attempts={}
         self.tester_rate_lock=threading.Lock()
         super().__init__(*args, **kwargs)

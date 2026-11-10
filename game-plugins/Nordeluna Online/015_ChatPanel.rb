@@ -134,7 +134,7 @@ module NordelunaOnline
           box(bitmap, 9, 8, 15, 11, Color.new(99, 216, 229))
           bitmap.fill_rect(12, 18, 4, 4, Color.new(99, 216, 229))
           bitmap.fill_rect(12, 11, 9, 2, Color.new(9, 21, 36))
-          status_color = MapChannel.active? ? Color.new(100, 218, 171) : Color.new(244, 190, 102)
+          status_color = defined?(OnlineUI) ? Color.new(*OnlineUI.connection_badge[1]) : Color.new(156,167,180)
           bitmap.fill_rect(width - 12, 12, 5, 5, status_color)
           label_width = width - (unseen > 0 ? 79 : 47)
           bitmap.font.size = 14
@@ -148,7 +148,12 @@ module NordelunaOnline
           end
           @collapsed_signature = signature
         end
-        open_chat if inside?(mouse_click, [@collapsed.x, @collapsed.y, width, height])
+        point=mouse_click
+        if inside?(point,[@collapsed.x+width-18,@collapsed.y,18,height])
+          SocialHub.connection
+        elsif inside?(point, [@collapsed.x, @collapsed.y, width-18, height])
+          open_chat
+        end
       rescue StandardError => error
         NordelunaOnline.record_online_error(error, "chat_panel")
         dispose
@@ -179,6 +184,9 @@ module NordelunaOnline
           "Versao do servidor: #{remote['version'] || 'nao informada'}",
           "Protocolo: #{remote['protocol'] || '--'} | revisao: #{remote['revision'] || '--'}",
           "Ultima latencia: #{remote['latency_ms'] ? remote['latency_ms'].to_s + ' ms' : '--'}",
+          "Media: #{remote['latency_average_ms'] || '--'} ms / #{remote['latency_samples'] || 0} amostras",
+          "Variacao (max-min): #{remote['latency_range_ms'] || '--'} ms",
+          "Processamento no servidor: #{remote['server_ms'] || '--'} ms",
           "Sala: #{data['room']} | #{data['state']}",
           error ? "Ultimo erro (#{Time.at(error['time']).strftime('%H:%M')} / #{error['action']}): #{error['message']}" : "Ultimo erro: nenhum nesta sessao."]
       end

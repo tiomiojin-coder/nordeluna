@@ -16,6 +16,7 @@ def build(output, code=130):
     subprocess.run([str(compiler),'/nologo','/codepage:65001','/target:winexe','/platform:x64','/optimize+',
         '/reference:System.Windows.Forms.dll','/reference:System.Drawing.dll','/reference:System.Web.Extensions.dll',
         '/reference:System.IO.Compression.dll','/reference:System.IO.Compression.FileSystem.dll','/reference:System.Security.dll',
+        '/resource:'+str(ROOT/'android/assets/nordeluna-launcher.png')+',Nordeluna.Brand',
         '/win32icon:'+str(ROOT/'windows/nordeluna.ico'),'/out:'+str(output/'Nordeluna.exe'),str(ROOT/'windows/Launcher.cs'),str(ROOT/'windows/Repair.cs'),str(ROOT/'windows/Tester.cs'),str(key)],check=True)
     return output/'Nordeluna.exe'
 

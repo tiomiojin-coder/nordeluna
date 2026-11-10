@@ -58,6 +58,9 @@ Marshal.dump(bundle).unpack1("H*")
         archive.writestr("Data/PluginScripts.rxdata", compiled)
         for path in [*sorted(source.glob("*.rb")), source / "meta.txt"]:
             archive.write(path, "Plugins/Nordeluna Online/" + path.name)
+        outfits=source/'assets/outfits.json'
+        if outfits.is_file():
+            archive.write(outfits,'Plugins/Nordeluna Online/assets/outfits.json')
         for path in sorted((source / "bridge").glob("*")):
             if path.is_file() and path.suffix in (".exe", ".cs"):
                 archive.write(path, "Plugins/Nordeluna Online/bridge/" + path.name)

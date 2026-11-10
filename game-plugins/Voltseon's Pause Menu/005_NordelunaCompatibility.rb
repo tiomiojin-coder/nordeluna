@@ -15,6 +15,15 @@ class PokemonSystem
     path = nordeluna_vpm_theme_path(data, default)
     return path unless data.is_a?(String) && data.start_with?("menu_")
     return path if pbResolveBitmap(MENU_FILE_PATH + path)
+    custom_icon = {
+      "menu_nordeluna_online" => "menu_online",
+      "menu_nordeluna_performance" => "menu_desempenho",
+      "menu_achievements" => "menu_conquistas"
+    }[data]
+    if custom_icon
+      custom_path = nordeluna_vpm_theme_path(custom_icon)
+      return custom_path if pbResolveBitmap(MENU_FILE_PATH + custom_path)
+    end
     fallback = case data
                when /online|friend|chat/ then "menu_pokegear"
                when /performance|controls/ then "menu_options"

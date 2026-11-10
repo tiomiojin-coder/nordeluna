@@ -75,6 +75,9 @@ module NordelunaOnline
           icon=PokemonSprite.new(viewport)
           icon.setSpeciesBitmap(reward['species'].to_sym,0,reward['form'],reward['shiny'],false,false,!!reward['egg'])
           width,height=icon.bitmap ? [icon.bitmap.width,icon.bitmap.height] : [0,0]
+        elsif reward['kind']=='outfit'
+          icon=WardrobePreview.new(viewport,reward['id'])
+          width,height=icon.src_rect.width,icon.src_rect.height
         else
           return nil
         end

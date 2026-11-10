@@ -1,0 +1,52 @@
+# No network access: exercise the actual SafeTransport error decoder.
+module SessionErrorTransportFixture
+  def start(url,data)
+    return super unless $session_error_reply
+    $session_error_calls=($session_error_calls || 0)+1
+    RoomReplyTicket.new($session_error_reply)
+  end
+end
+NordelunaOnline::Transport.singleton_class.prepend(SessionErrorTransportFixture)
+transport=NordelunaOnline::SafeTransport.instance_method(:request).bind(NordelunaOnline)
+transport=transport.super_method until transport.owner==NordelunaOnline::SafeTransport
+begin
+  ['Sessao de mapa invalida.','Canal de mapa expirou. Entre novamente.'].each do |message|
+    $session_error_reply={'ok'=>false,'error'=>message}
+    begin
+      transport.call('https://nordeluna-online.discloud.dev',{'action'=>'map_enter','token'=>'fixture-token','map'=>40})
+      raise 'expired session was accepted'
+    rescue NordelunaOnline::MapSessionExpired=>error
+      check(error.message.include?('expirou'),'expired session lacks a clear reconnect message')
+    end
+    result=transport.call('https://nordeluna-online.discloud.dev',{'action'=>'map_leave','token'=>'fixture-token'})
+    check(result['ok']==true,'leaving an expired session was not idempotent')
+  end
+  before=$session_error_calls
+  $session_error_reply={'ok'=>false,'error'=>'Sessao de mapa invalida.','code'=>'BANNED','until'=>0}
+  begin
+    transport.call('https://nordeluna-online.discloud.dev',{'action'=>'map_leave','token'=>'fixture-token'})
+    raise 'moderation error was hidden as an expired-session cleanup'
+  rescue NordelunaOnline::ModerationError=>error
+    check(error.moderation_code=='BANNED','moderation code changed')
+  end
+  before=$session_error_calls
+  gate=NordelunaOnline::MapNetworkGate.instance_method(:request).bind(NordelunaOnline)
+  begin
+    gate.call('https://nordeluna-online.discloud.dev',{'action'=>'map_enter','token'=>nil,'map'=>40})
+    raise 'nil map token was accepted'
+  rescue NordelunaOnline::MapSessionExpired
+  end
+  check($session_error_calls==before,'a nil session token reached the transport')
+ensure
+  $session_error_reply=nil
+end
+NordelunaOnline.instance_variable_set(:@latency_samples,[])
+NordelunaOnline.instance_variable_set(:@latency_server,NordelunaOnline.server)
+21.times { |i| NordelunaOnline.observe_server({'server_ms'=>2.25},i*10) }
+timing=NordelunaOnline.diagnostic_snapshot['remote']
+check(timing['latency_samples']==20 && timing['latency_average_ms']==105,'latency rolling window is inaccurate')
+check(timing['latency_range_ms']==190 && timing['server_ms']==2.25,'timing diagnostics lost processing/jitter')
+NordelunaOnline.observe_server({'server_ms'=>Float::NAN},Float::INFINITY)
+timing=NordelunaOnline.diagnostic_snapshot['remote']
+check(timing['latency_samples']==20 && !timing.key?('server_ms'),'invalid timing polluted diagnostics')
+'PASS: transport lifecycle, expired sessions, responsive idle presence and rolling latency diagnostics; previous runtime regressions preserved.'

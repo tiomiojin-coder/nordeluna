@@ -149,6 +149,7 @@ module NordelunaOnline
         @busy = true
         raise ConnectionLost, "Conexao de area indisponivel." unless MapChannel.active?
         MapChannel.drain
+        raise MapSessionExpired, "A sessao online foi encerrada antes da troca de mapa. Entre novamente na sala." unless MapChannel.active?
         reply = NordelunaOnline.request(NordelunaOnline.server,
           "action" => "map_enter", "token" => MapChannel.instance_variable_get(:@token), "map" => map)
         raise Error, "Transicao nao autorizada pelo servidor." unless reply["map"] == map

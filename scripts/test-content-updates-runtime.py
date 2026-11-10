@@ -13,8 +13,13 @@ from server.updates import DIGEST_INFO
 
 key=json.loads((ROOT/'.cache/content-updates/private-key.json').read_text())
 public=json.loads((ROOT/'server/content-key.json').read_text())
+ruby=Ruby()
 old={'Data/Map039.rxdata':b'old-map','Graphics/UI/test.png':b'old-image'}
 new={'Data/Map039.rxdata':b'new-map'*300,'Graphics/UI/test.png':b'new-image'*50,'Data/Map042.rxdata':b'new-area'*20}
+old['Data/species.dat']=bytes.fromhex(ruby.evaluate('Marshal.dump({TEST: {hp: 40}}).unpack1("H*")'))
+new['Data/species.dat']=bytes.fromhex(ruby.evaluate('Marshal.dump({TEST: {hp: 50}, NEWMON: {hp: 60}}).unpack1("H*")'))
+old['Data/moves.dat']=bytes.fromhex(ruby.evaluate('Marshal.dump({TESTMOVE: {power: 40}}).unpack1("H*")'))
+new['Data/moves.dat']=bytes.fromhex(ruby.evaluate('Marshal.dump({TESTMOVE: {power: 60}}).unpack1("H*")'))
 files=[];packed={}
 for name,body in new.items():
     blob=zlib.compress(body);digest=hashlib.sha256(blob).hexdigest();packed[digest]=blob
@@ -23,8 +28,23 @@ data=dict(version=1,base=public['base'],title='Teste',notes='Novos mapas',files=
 raw=json.dumps(data,separators=(',',':'))
 digest=DIGEST_INFO+hashlib.sha256(raw.encode()).digest();block=b'\0\1'+b'\xff'*(256-len(digest)-3)+b'\0'+digest
 signature=f'{pow(int.from_bytes(block,"big"),int(key["d"],16),int(key["n"],16)):0512x}'
-ruby=Ruby()
 ruby.load_source((ROOT/'scripts/fixtures/content-updates.fixture').read_text(encoding='utf-8'),'in-memory updater environment')
+ruby.load_source('''
+module GameData
+  class Move
+    def self.load
+      ($ota_load_order||=[]) << :Move
+      $ota_moves=Marshal.load(File.binread('Data/moves.dat'))
+    end
+  end
+  class Species
+    def self.load
+      ($ota_load_order||=[]) << :Species
+      $ota_species=Marshal.load(File.binread('Data/species.dat'))
+    end
+  end
+end
+''','compiled species loader')
 ruby.load_source((DEFAULT_GAME/'Plugins/Nordeluna Online/002_JSON.rb').read_text(encoding='utf-8'),'actual JSON codec')
 source=(ROOT/'game-plugins/Nordeluna Online/028_ContentUpdates.rb').read_text(encoding='utf-8')
 if '--pc' in sys.argv:
@@ -63,6 +83,9 @@ ota_check(updater.installed['version']==0,'download changed installed version')
 ota_check($ota_files['Data/Map039.rxdata']=='old-map','download touched running map')
 updater.apply_pending
 ota_check(updater.installed['version']==1,'verified pack not applied')
+ota_check($ota_species[:TEST][:hp]==50,'updated species not reloaded')
+ota_check($ota_moves[:TESTMOVE][:power]==60,'updated move not reloaded')
+ota_check($ota_load_order.first(2)==[:Move,:Species],'dependent tables loaded out of order')
 data['files'].each { |r| ota_check(updater.sha_file(r['path'])==r['sha256'],'installed file hash differs') }
 ota_check($ota_files[updater.path('rollback/Data/Map039.rxdata')]=='old-map','original map not backed up')
 # An interrupted commit restores the original files before game initialization.
@@ -72,6 +95,8 @@ $ota_files['Data/Map039.rxdata']='half-written'
 updater.apply_pending
 ota_check($ota_files['Data/Map039.rxdata']=='old-map' && !$ota_files.key?('Data/Map042.rxdata'),'interrupted update did not restore original filesystem')
 ota_check(updater.installed['version']==0,'interruption left wrong version marker')
+ota_check($ota_species[:TEST][:hp]==40,'rollback left updated species in memory')
+ota_check($ota_moves[:TESTMOVE][:power]==40,'rollback left updated moves in memory')
 # Failure after the first rename must roll back the entire pack.
 updater.write_json(updater.path('pending.json'),reply)
 $ota_fault='Graphics/UI/test.png'
@@ -85,6 +110,18 @@ ota_check($ota_files['Data/Map039.rxdata']=='unknown-local-map','wrong base was 
 $ota_files['Data/Map039.rxdata']='old-map'
 updater.apply_pending
 ota_check(updater.installed['version']==1,'retry after failure did not install')
+# Reject removal of a species already present on the device before any write.
+row=data['files'].find { |r| r['path']=='Data/species.dat' }
+stage=updater.stage_file(row);original=$ota_files[stage]
+$ota_files[stage]=Marshal.dump({TEST: {hp: 70}})
+ota_reject('species removal accepted') { updater.validate_species_files([row]) }
+$ota_files[stage]='invalid marshal'
+begin
+  updater.validate_species_files([row])
+  raise 'corrupt compiled species accepted'
+rescue TypeError,ArgumentError
+end
+$ota_files[stage]=original
 ''','crypto/download/rollback scenarios')
 if '--pc' in sys.argv:
     ruby.load_source('''
@@ -92,6 +129,8 @@ updater=NordelunaOnline::ContentUpdates
 $ota_files.delete(updater.path('installed.json'))
 $ota_files['Data/Map039.rxdata']='pc-factory-map'
 $ota_files['Graphics/UI/test.png']='old-image'
+$ota_files['Data/species.dat']=[$ota['old']['Data/species.dat']].pack('H*')
+$ota_files['Data/moves.dat']=[$ota['old']['Data/moves.dat']].pack('H*')
 $ota_files.delete('Data/Map042.rxdata')
 factory={'base'=>updater::BASE,'files'=>{'Data/Map039.rxdata'=>updater::SHA256.new.update('pc-factory-map').hexdigest}}
 updater.write_json('Data/PCContentBase.json',factory)

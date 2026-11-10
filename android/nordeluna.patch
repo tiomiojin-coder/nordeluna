@@ -12,8 +12,8 @@ diff --git a/android/app/build.gradle b/android/app/build.gradle
 -        versionCode 1
 -        versionName "0.1.0"
 -        archivesBaseName = "mkxp-z-$versionName"
-+        versionCode 23
-+        versionName "1.16.0"
++        versionCode 24
++        versionName "1.16.1"
 +        archivesBaseName = "Nordeluna-Android-$versionName"
          // Native ABIs are produced by build.sh (see ../build.sh) and placed
          // under src/main/jniLibs/. Everything present there is packaged.

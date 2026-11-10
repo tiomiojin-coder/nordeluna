@@ -17,6 +17,8 @@ public class ClientRepairTest {
         ByteArrayOutputStream buffer=new ByteArrayOutputStream();try(ZipOutputStream zip=new ZipOutputStream(buffer)){zip.putNextEntry(new ZipEntry("client-repair.json"));zip.write(bytes(meta.toString()));zip.closeEntry();for(Map.Entry<String,String> entry:files.entrySet()){zip.putNextEntry(new ZipEntry(entry.getKey()));zip.write(bytes(entry.getValue()));zip.closeEntry();}}return buffer.toByteArray();
     }
     public static void main(String[] args)throws Exception{
+        check(ClientRepair.contentPath("Data/species.dat") && ClientRepair.contentPath("Data/species_metrics.dat"),"Compiled species not preserved by repair");
+        check(!ClientRepair.contentPath("Data/PluginScripts.rxdata"),"Repair content allows plugins");
         File game=new File(args[0]);game.mkdirs();Map<String,String> files=new LinkedHashMap<>();files.put("Game.ini","correct-ini");files.put("Data/PluginScripts.rxdata","correct-plugins");files.put("Graphics/Tilesets/Árvore.png","original-image");files.put("mkxp.json","{\"fullscreen\":false}");byte[] archive=bundle(files);
         File image=new File(game,"Graphics/Tilesets/Árvore.png");ClientFiles.write(image,bytes("original-image"));ClientFiles.write(new File(game,"mkxp.json"),bytes("{\"fullscreen\":true}"));ClientFiles.write(new File(game,"Saves/Save_1.rxdata"),bytes("private-progress"));
         ClientRepair.Source source=()->new ByteArrayInputStream(archive);String config=new String(ClientFiles.read(new File(game,"mkxp.json")),StandardCharsets.UTF_8);long timestamp=image.lastModified();

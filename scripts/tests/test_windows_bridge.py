@@ -18,8 +18,11 @@ CSC = Path(os.environ.get("WINDIR", "C:/Windows")) / "Microsoft.NET/Framework64/
 class WindowsBridgeTests(unittest.TestCase):
     def test_real_http_six_pokemon_unicode_cancellation_and_parent_exit(self):
         received = []
+        ports = []
         class Handler(http.server.BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
             def do_POST(self):
+                ports.append(self.client_address[1])
                 received.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
                 body = json.dumps(dict(ok=True, species="NOCTGEIST", nick="Lúna"), ensure_ascii=False).encode()
                 self.send_response(200)
@@ -71,6 +74,7 @@ class WindowsBridgeTests(unittest.TestCase):
                     result = request(number)
                     self.assertTrue(result.startswith("200\n"), result + "\n" + (directory / "nordeluna-online-transport.log").read_text())
                 self.assertEqual(len(received), 15)
+                self.assertEqual(len(set(ports)),1,'successful requests did not reuse their TCP connection')
                 self.assertEqual((mailbox / "status").stat().st_mtime_ns, status_stamp,
                                  "broker rewrote its status while Ruby may be reading it")
                 self.assertTrue(all(len(row["payload"]) == 6 and row["profile"]["name"] == "Lúna" for row in received))

@@ -1,4 +1,8 @@
 module NordelunaOnline
+  class MapSessionExpired < ConnectionLost; end
+  def self.map_session_expired?(message)
+    !!message.to_s.match?(/Sessao de mapa invalida|Canal de mapa expirou/i)
+  end
   module Transport
     class << self
       def android?
@@ -191,6 +195,10 @@ module NordelunaOnline
         message = reply.is_a?(Hash) ? reply["error"].to_s : "Resposta invalida."
         if defined?(ModerationError) && reply.is_a?(Hash) && %w[CHAT_MUTED KICKED BANNED].include?(reply['code'])
           raise ModerationError.new(reply['code'],message,reply['until'])
+        end
+        if data.is_a?(Hash) && data['action'].to_s.start_with?('map_') && NordelunaOnline.map_session_expired?(message)
+          return {"ok"=>true} if data['action']=='map_leave'
+          raise MapSessionExpired, "A sessao online expirou. Entre novamente na sala."
         end
         raise VersionMismatch, "As versoes nao sao compativeis. Atualize os dois jogos." if message.match?(/versoes do jogo sao diferentes|Protocolo incompativel/i)
         raise ConnectionLost, "A conexao foi interrompida. Nenhuma vitoria por queda." if message.match?(/Batalha encerrada|Sala nao encontrada/)

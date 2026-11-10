@@ -1,10 +1,14 @@
-# Only creator-signed maps/resources. Never downloads plugins, executables or saves.
+# Creator-signed maps, resources and compiled species. No plugins or executables.
 module NordelunaOnline
   module ContentUpdates
     BASE = '2ed640fb738bfdce30ecf863841da45f'
     PUBLIC_MODULUS = 'db48a98639249cc352e0d809438cb2e6ee8189affb28acbbcdb29816fc281340a0caa1f0b20712ff11825db355f63448328e7b91ab3a2847fe40a6e3762926e69b83c2924f64b4c45bfb4538d0bcbd2adc030dc9dbedfe11f63cb1b1307366ed1fdba8e34169aedd0eaa30b3abcfc9205e5e6979a2a1c3a8dfb14bf604c675943dfa15657262fe8eb89c7bbb4ba84e95f174812e494b6c8967c7949a3ccbd544f8816c9ac2baa6d4506cbe2128e4fce3394c764c3e92acffa00faba6293124154b9871f5257fc82dd98fcd03a975491a6e2582c6b64beb1a9a17d548ee31ea55a726cdfdcca0bf9a58ca0daefff95def0f06c529ee0508ccf4b70c99f726f199'
     CHUNK = 16_384
     DIRECTORY = '.nordeluna-updates'
+    SPECIES_FILES = {'Data/species.dat' => :Species,
+                     'Data/species_metrics.dat' => :SpeciesMetrics}.freeze
+    DATABASE_FILES = {'Data/types.dat'=>:Type, 'Data/abilities.dat'=>:Ability,
+                      'Data/moves.dat'=>:Move, 'Data/items.dat'=>:Item}.merge(SPECIES_FILES).freeze
     INFO = ['3031300d060960864801650304020105000420'].pack('H*')
 
     # SHA-256 fallback for Android runtimes without the OpenSSL/Digest extension.
@@ -67,6 +71,7 @@ module NordelunaOnline
         return false unless value.is_a?(String) && value.length<=220 && !value.match?(/[\\:\x00-\x1f]/)
         parts=value.split('/',-1)
         return false if parts.any? { |p| p.empty? || p.start_with?('.') || p.end_with?(' ','.') }
+        return true if DATABASE_FILES.key?(value) || value=='Data/regional_dexes.dat'
         return true if %w[Data/MapInfos.rxdata Data/Tilesets.rxdata Data/CommonEvents.rxdata Data/map_metadata.dat Data/map_connections.dat Data/encounters.dat].include?(value)
         return true if value.match?(/\AData\/Map[0-9]{3,6}\.rxdata\z/)
         return parts.length>=3 && value.match?(/\.(png|jpg|jpeg)\z/i) if parts[0]=='Graphics'
@@ -190,6 +195,30 @@ module NordelunaOnline
           end
         end
         write_json(path('installed.json'),journal['previous'])
+        reload_species(journal['files'])
+      end
+      def reload_species(rows)
+        return unless defined?(GameData)
+        paths=rows.map { |row| row['path'] }
+        DATABASE_FILES.each do |file,type|
+          next unless paths.include?(file) && GameData.const_defined?(type)
+          GameData.const_get(type).load
+        end
+        if paths.include?('Data/regional_dexes.dat') && defined?($game_temp) && $game_temp && $game_temp.respond_to?(:regional_dexes_data=)
+          $game_temp.regional_dexes_data=nil
+        end
+      end
+      def validate_species_files(rows)
+        rows.each do |row|
+          next unless DATABASE_FILES.key?(row['path'])
+          data=Marshal.load(File.binread(stage_file(row)))
+          raise Error,'Tabela de Pokemon invalida.' unless data.is_a?(Hash) && !data.empty?
+          next unless File.file?(row['path'])
+          old=Marshal.load(File.binread(row['path']))
+          unless old.is_a?(Hash) && (old.keys-data.keys).empty?
+            raise Error,'O pacote remove IDs existentes do banco de dados. Os arquivos e saves foram preservados.'
+          end
+        end
       end
       def apply_pending
         if File.file?(path('journal.json'))
@@ -213,9 +242,11 @@ module NordelunaOnline
           atomic_write(path('rollback/'+target),File.binread(target)) if existed
           journal['files']<<{'path'=>target,'existed'=>existed,'sha256'=>before}
         end
+        validate_species_files(data['files'])
         journal['phase']='applying';write_json(path('journal.json'),journal)
         begin
           data['files'].each { |row| atomic_write(row['path'],File.binread(stage_file(row))) }
+          reload_species(data['files'])
           write_json(path('installed.json'),data)
           journal['phase']='done';write_json(path('journal.json'),journal)
           write_json(path('rollback/info.json'),journal)
@@ -230,10 +261,10 @@ module NordelunaOnline
       def version;@installed_version ||= installed['version'];end
       def open
         raise Error,'Finalize a batalha ou troca antes de atualizar.' if NordelunaOnline.pending_trade || LunaEconomy.pending || Gifts.pending || $game_temp.in_battle
-        reply=api('action'=>'update_manifest','base'=>BASE)
+        reply=api('action'=>'update_manifest','base'=>BASE,'species_updates'=>1,'database_updates'=>1)
         return pbMessage(_INTL('Nenhum pacote novo para esta base do jogo. Conteudo instalado: {1}.',version)) unless reply['manifest']
         data=verify(reply['manifest'],reply['signature'])
-        return pbMessage(_INTL('Mapas e recursos estao atualizados. Versao: {1}.',version)) if data['version']<=version
+        return pbMessage(_INTL('Conteudo do jogo atualizado. Versao: {1}.',version)) if data['version']<=version
         size=data['files'].sum { |r| r['packed_size'] }
         audience=reply['channel']=='testers' ? ' / TESTE RESTRITO' : ''
         choice=OnlineUI.choose('Atualizacao do jogo',["Baixar pacote #{data['version']} (#{(size/1024.0).ceil} KB)#{audience}",'Voltar'],1,data['title'])

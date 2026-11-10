@@ -34,6 +34,7 @@ class EconomyService(ContentService):
             'CREATE TABLE IF NOT EXISTS shop_orders(account TEXT,id TEXT,sku TEXT,claim TEXT,created INTEGER,PRIMARY KEY(account,id))',
             'CREATE INDEX IF NOT EXISTS ledger_recent ON coin_ledger(account,created DESC)',
             'CREATE TABLE IF NOT EXISTS cosmetic_preferences(account TEXT PRIMARY KEY,badge TEXT NOT NULL)',
+            'CREATE TABLE IF NOT EXISTS outfit_orders(account TEXT,outfit TEXT,claim TEXT NOT NULL,PRIMARY KEY(account,outfit))',
         ):
             self.db.execute(sql)
         self.matchmaking = {}
@@ -181,9 +182,16 @@ class EconomyService(ContentService):
               'O preco mudou. Atualize a loja antes de confirmar a compra.')
         check(self.balance(account)>=item['price'],'Luna Coins insuficientes.')
         rewards = rewards_data(item['rewards'])
+        outfits=[row['id'] for row in rewards if row['kind']=='outfit']
+        check(len(outfits)==len(set(outfits)), 'Produto com roupa repetida.')
+        for outfit in outfits:
+            check(not self.db.execute('SELECT 1 FROM outfit_orders WHERE account=? AND outfit=?',(account,outfit)).fetchone(),
+                  'Esta roupa ja foi comprada. Recupere a compra no save original.')
         self.db.execute('UPDATE wallets SET balance=balance-? WHERE account=?',(item['price'],account))
         self.db.execute('INSERT INTO coin_ledger VALUES(?,?,?,?)',(account,'purchase:'+order,-item['price'],int(time.time())))
         identity=secrets.token_hex(16)
+        for outfit in outfits:
+            self.db.execute('INSERT INTO outfit_orders VALUES(?,?,?)',(account,outfit,identity))
         data=dict(code='LOJA-'+sku,gift='order:'+order,title=item['title'],rewards=rewards)
         self.db.execute('INSERT INTO gift_claims VALUES(?,?,?,?,?,?,?)',(identity,account,'order:'+order,json.dumps(data),'reserved',int(time.time()),int(time.time())))
         self.db.execute('INSERT INTO shop_orders VALUES(?,?,?,?,?)',(account,order,sku,identity,int(time.time())))

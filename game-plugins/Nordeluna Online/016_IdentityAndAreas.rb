@@ -15,7 +15,7 @@ module NordelunaOnline
   NICK_OFFSET = 8
   REMOTE_DISTANCE = 18
   SHOW_NICKNAMES = true
-  POSITION_INTERVAL = 0.25
+  POSITION_INTERVAL = 0.15
   POSITION_HEARTBEAT = 3.0
 
   module Identity

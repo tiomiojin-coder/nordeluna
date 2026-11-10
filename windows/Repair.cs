@@ -14,7 +14,7 @@ static partial class Files {
         if(!RuntimePath(name)||name.Split('/').Any(p=>p.Equals("Saves",StringComparison.OrdinalIgnoreCase)))return false;
         return !Regex.IsMatch(Path.GetFileName(name),@"\A(?:Save_?\d*|Game)\.(?:rxdata|rvdata2?)\z",RegexOptions.IgnoreCase);
     }
-    static bool ContentPath(string name){return RepairPath(name)&&(Regex.IsMatch(name,@"\AData/Map[0-9]{3,6}\.rxdata\z")||new[]{"Data/MapInfos.rxdata","Data/Tilesets.rxdata","Data/CommonEvents.rxdata","Data/map_metadata.dat","Data/map_connections.dat","Data/encounters.dat"}.Contains(name)||new[]{"Graphics/","Audio/","Movies/"}.Any(p=>name.StartsWith(p,StringComparison.Ordinal)));}
+    static bool ContentPath(string name){return RepairPath(name)&&(Regex.IsMatch(name,@"\AData/Map[0-9]{3,6}\.rxdata\z")||new[]{"Data/MapInfos.rxdata","Data/Tilesets.rxdata","Data/CommonEvents.rxdata","Data/map_metadata.dat","Data/map_connections.dat","Data/encounters.dat","Data/species.dat","Data/species_metrics.dat","Data/types.dat","Data/abilities.dat","Data/moves.dat","Data/items.dat","Data/regional_dexes.dat"}.Contains(name)||new[]{"Graphics/","Audio/","Movies/"}.Any(p=>name.StartsWith(p,StringComparison.Ordinal)));}
     static string RepairTarget(string root,string name){
         string target=Child(root,name),relative=target.Substring(Path.GetFullPath(root).TrimEnd('\\').Length).TrimStart('\\');string current=Path.GetFullPath(root);
         foreach(string part in relative.Split('\\')){current=Path.Combine(current,part);if((File.Exists(current)||Directory.Exists(current))&&(File.GetAttributes(current)&FileAttributes.ReparsePoint)!=0)throw new IOException("Link não permitido na reparação");}return target;

@@ -21,6 +21,8 @@ def main():
     parser.add_argument('--pc-code',type=int,default=130);parser.add_argument('--android-code',type=int,default=23)
     parser.add_argument('--pc-commit');parser.add_argument('--android-commit')
     parser.add_argument('--stable-only',action='store_true',help='Publicar somente o catalogo estavel')
+    parser.add_argument('--testers-only',action='store_true',help='Preparar apenas o catalogo privado, sem alterar o estavel')
+    parser.add_argument('--notes',type=Path,default=ROOT/'docs/release-1.16.md')
     parser.add_argument('--publish',action='store_true');args=parser.parse_args()
     client=GitHub();repo=client.get('')
     if repo['private']:raise ValueError('Os jogadores precisam de acesso publico aos downloads.')
@@ -46,7 +48,7 @@ def main():
             crc=0
             for name in ('species','moves','abilities','items','types','trainer_types'):crc=zlib.crc32(game.read('Data/'+name+'.dat'),crc)
     meta={'compatibility':build+'-'+str(crc)}
-    notes=(ROOT/'docs/release-1.16.md').read_text(encoding='utf-8')
+    notes=args.notes.read_text(encoding='utf-8')
     def row(release,pattern,code,compat):
         matches=[asset for asset in release['assets'] if re.fullmatch(pattern,asset['name'])]
         if len(matches)!=1:raise ValueError('Nao foi encontrado exatamente um pacote: '+pattern)
@@ -89,6 +91,9 @@ def main():
         private_output=ROOT/'.cache/testers/publicacao-testers.json';private_output.parent.mkdir(parents=True,exist_ok=True)
         private_output.write_text(json.dumps(protected,ensure_ascii=False),encoding='utf-8')
         print('Publicacao privada preparada. Importe no painel Testers; nao compartilhe esse JSON.')
+    if args.testers_only:
+        if args.stable_only:raise ValueError('Escolha apenas um publico para a publicacao.')
+        return
     output=ROOT/'public/launcher/releases.json';output.parent.mkdir(parents=True,exist_ok=True)
     output.write_text(json.dumps(signer.sign(data),ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
     print('Catalogo publico estavel conferido e assinado. Testers nunca entram no catalogo publico.')

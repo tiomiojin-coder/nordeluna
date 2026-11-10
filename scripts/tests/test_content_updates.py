@@ -119,7 +119,53 @@ class ContentUpdateTests(unittest.TestCase):
         captured=json.loads(self.base.read_text())
         self.assertEqual(captured['files']['Data/Map039.rxdata'],hashlib.sha256(b'actual-apk-map').hexdigest())
         self.assertNotIn('Data/System.rxdata',captured['compatibility'])
-        self.assertIn('Data/species.dat',captured['compatibility'])
+        self.assertIn('Data/species.dat',captured['files'])
+        self.assertNotIn('Data/species.dat',captured['compatibility'])
+
+    def test_species_pack_is_only_offered_to_capable_clients(self):
+        base=json.loads(self.base.read_text())
+        old=b'old-species'
+        base['compatibility']={'Data/species.dat':hashlib.sha256(old).hexdigest()}
+        self.base.write_text(json.dumps(base))
+        (self.game/'Data/species.dat').write_bytes(b'new-species')
+        # Semantic validation runs in its own native Ruby process. This unit
+        # case tests manifest migration/filtering using an isolated stand-in.
+        with patch.object(builder,'BASE',self.base),patch.object(builder.subprocess,'run') as run:
+            run.return_value.returncode=0
+            path=builder.build(1,'Pokemon','Balanceamento',self.game,self.root/'species.zip')
+        package=builder.load_package(path)
+        row=next(r for r in package[2]['files'] if r['path']=='Data/species.dat')
+        self.assertEqual(row['base_sha256'],hashlib.sha256(old).hexdigest())
+        self.upload(package)
+        request=dict(protocol=1,action='update_manifest',base=base['base'])
+        self.assertIsNone(self.store.handle(request)['manifest'])
+        self.assertEqual(self.store.handle(dict(request,species_updates=1))['manifest'],package[0])
+
+    def test_other_database_tables_still_require_full_update(self):
+        base=json.loads(self.base.read_text())
+        base['compatibility']={'Data/trainers.dat':hashlib.sha256(b'old').hexdigest()}
+        self.base.write_text(json.dumps(base))
+        (self.game/'Data/trainers.dat').write_bytes(b'new')
+        with patch.object(builder,'BASE',self.base),self.assertRaisesRegex(ValueError,'versao completa'):
+            builder.build(1,'Test','',self.game,self.root/'bad.zip')
+
+    def test_moves_pack_requires_extended_database_capability(self):
+        (self.game/'Data/moves.dat').write_bytes(b'compiled-moves')
+        with patch.object(builder,'BASE',self.base),patch.object(builder.subprocess,'run') as run:
+            run.return_value.returncode=0
+            path=builder.build(1,'Moves','Novos golpes',self.game,self.root/'moves.zip')
+        package=builder.load_package(path);self.upload(package)
+        query=dict(protocol=1,action='update_manifest',base=package[2]['base'],species_updates=1)
+        self.assertIsNone(self.store.handle(query)['manifest'])
+        self.assertEqual(self.store.handle(dict(query,database_updates=1))['manifest'],package[0])
+
+    def test_invalid_compiled_species_cannot_be_packaged(self):
+        (self.game/'Data/species.dat').write_bytes(b'corrupt')
+        with patch.object(builder,'BASE',self.base),patch.object(builder.subprocess,'run') as run:
+            run.return_value.returncode=1
+            run.return_value.stderr=b'Invalid compiled data'
+            with self.assertRaisesRegex(ValueError,'invalidos'):
+                builder.build(1,'Test','',self.game,self.root/'bad.zip')
     def accounts(self):
         import secrets
         result=[]

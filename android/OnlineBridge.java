@@ -97,6 +97,7 @@ public final class OnlineBridge implements AutoCloseable {
 
     private void execute(Job job, File file) {
         String result;
+        boolean completed = false;
         try {
             if (!resumed || job.cancelled || new File(directory, job.id + ".cancel").exists())
                 throw new IOException("App pausado ou pedido cancelado.");
@@ -128,13 +129,16 @@ public final class OnlineBridge implements AutoCloseable {
             byte[] response = input == null ? new byte[0] : readLimited(input, MAX_RESPONSE);
             if (job.cancelled || !resumed) throw new IOException("Conexao interrompida ao pausar o aplicativo.");
             result = status + "\n" + new String(response, StandardCharsets.UTF_8);
+            completed = true;
             diagnostic("http=" + status + " ms=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - job.started));
         } catch (Exception error) {
             // Never log URL, body, room token or Pokemon data.
             diagnostic("network-error " + error.getClass().getSimpleName());
             result = "ERROR\nConexao interrompida ou servidor sem resposta. Verifique a internet e tente novamente.";
         } finally {
-            if (job.connection != null) job.connection.disconnect();
+            // A fully consumed/closed response can return to the HTTP pool.
+            // Abort only cancelled/failed requests, never healthy pooled sockets.
+            if (job.connection != null && !completed) job.connection.disconnect();
             file.delete();
         }
         try {

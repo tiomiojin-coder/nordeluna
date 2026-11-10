@@ -197,10 +197,7 @@ module NordelunaOnline
             return if NordelunaOnline.pending_trade
           end
           badge=Friends.badge
-          choice=OnlineUI.choose("Online",["Praca central", "Amigos e convites#{badge>0 ? " (#{badge})" : ''}",
-            "Presentes#{Gifts.pending ? ' (pendente)' : ''}", "Luna Coins e missoes", "Jogadores proximos", "Chat da sala", "Batalhas e trocas", "Emotes",
-            "Meu perfil e status", "Conexao", "Atualizacoes do jogo", "Voltar"],11,
-            "#{NordelunaOnline.nickname} / #{MapChannel.connection_label}")
+          choice=OnlineUI.home_cards
           result=case choice
           when 0 then MapChannel.connect("PRACA") ? :sent : nil
           when 1 then Friends.open
@@ -213,6 +210,7 @@ module NordelunaOnline
           when 8 then profile
           when 9 then connection
           when 10 then ContentUpdates.open
+          when 12 then LunaEconomy.shop
           else return
           end
           return :sent if result==:sent || initial_map!=$game_map&.map_id
@@ -222,6 +220,12 @@ module NordelunaOnline
       rescue StandardError => error
         NordelunaOnline.record_online_error(error,"online_hub")
         pbMessage(_INTL("Nao foi possivel abrir esta opcao. O diagnostico foi registrado."))
+      end
+
+      def more
+        actions=[2,3,4,7,8,10,11]
+        n=OnlineUI.choose('Mais do Online',['Presentes','Missoes e comunidade','Jogadores proximos','Emotes','Meu perfil','Atualizacoes','Voltar'],6)
+        actions[n]
       end
 
       def matches

@@ -106,7 +106,8 @@ module NordelunaAtmosphere
       end
       reset_particles if changed
       sync_lights
-      @sound.update(@state[:sound], @map_id)
+      # Atmosphere is visual-only. Stop only this plugin's own ambient BGS.
+      @sound.stop
     end
 
     def reset_particles

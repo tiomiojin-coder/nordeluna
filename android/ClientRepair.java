@@ -19,7 +19,7 @@ public final class ClientRepair {
     }
     public static boolean contentPath(String path){
         if(!runtimePath(path))return false;
-        return path.matches("Data/Map[0-9]{3,6}\\.rxdata")||Arrays.asList("Data/MapInfos.rxdata","Data/Tilesets.rxdata","Data/CommonEvents.rxdata","Data/map_metadata.dat","Data/map_connections.dat","Data/encounters.dat").contains(path)||path.matches("(?:Graphics|Audio|Movies)/.+");
+        return path.matches("Data/Map[0-9]{3,6}\\.rxdata")||Arrays.asList("Data/MapInfos.rxdata","Data/Tilesets.rxdata","Data/CommonEvents.rxdata","Data/map_metadata.dat","Data/map_connections.dat","Data/encounters.dat","Data/species.dat","Data/species_metrics.dat","Data/types.dat","Data/abilities.dat","Data/moves.dat","Data/items.dat","Data/regional_dexes.dat").contains(path)||path.matches("(?:Graphics|Audio|Movies)/.+");
     }
     private static JSONObject json(File file)throws Exception{return new JSONObject(new String(ClientFiles.read(file),StandardCharsets.UTF_8));}
     private static File safe(File root,String name)throws Exception{

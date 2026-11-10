@@ -36,7 +36,9 @@ public class OnlineBridgeTest {
         ExecutorService handlers = Executors.newCachedThreadPool();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.setExecutor(handlers);
+        java.util.Set<Integer> ports=java.util.concurrent.ConcurrentHashMap.newKeySet();
         server.createContext("/api", exchange -> {
+            ports.add(exchange.getRemoteAddress().getPort());
             requests.incrementAndGet();
             received.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             String selected = mode.get();
@@ -63,6 +65,12 @@ public class OnlineBridgeTest {
             submit(dir, id, session, url, secretBody);
             check(response(dir, id).startsWith("200\n{\"ok\":true"), "HTTP response not returned");
             check(received.get().equals(secretBody), "Unicode/body changed in transport");
+            for(int sample=40;sample<45;sample++){
+                String next=String.format("%032x",sample);
+                submit(dir,next,session,url,secretBody);
+                check(response(dir,next).startsWith("200\n"),"pooled request failed");
+            }
+            check(ports.size()==1,"healthy requests did not reuse their connection");
             check(!read(new File(game, "nordeluna-online-transport.log")).contains("PRIVATE_TOKEN"), "secret leaked to logs");
             int before = requests.get();
             id = "b".repeat(32);

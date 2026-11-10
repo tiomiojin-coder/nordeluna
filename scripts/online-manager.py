@@ -32,6 +32,8 @@ def validate_catalog(data):
     data=validate_content(data);catalog=gifts.catalog()
     for product in data['shop'].values():
         for reward in product['rewards']:
+            if reward['kind']=='outfit' and reward['id'] not in catalog.get('outfits',{}):
+                raise ValueError('Roupa nao cadastrada no jogo local: '+reward['id'])
             if reward['kind']=='item' and reward['id'] not in catalog['items']:
                 raise ValueError('Item nao encontrado no jogo local: '+reward['id'])
             if reward['kind']=='pokemon':
@@ -143,12 +145,12 @@ def main():
         else:
             entry(form,'Preco em Luna Coins',group+'_price',3,'25')
             reward_box=ttk.LabelFrame(form,text='Recompensas do produto',padding=8);reward_box.grid(row=4,column=0,columnspan=2,sticky='nsew',pady=8);reward_box.columnconfigure(1,weight=1)
-            entry(reward_box,'Tipo','reward_kind',0,'Item',['Item','Pokemon','Ovo','Dinheiro'])
+            entry(reward_box,'Tipo','reward_kind',0,'Item',['Item','Pokemon','Ovo','Dinheiro','Roupa'])
             catalog=gifts.catalog()
             combo=entry(reward_box,'ID / especie','reward_id',1,values=list(catalog['items']))
             def choices(*args):
                 group='pokemon' if fields['reward_kind'].get() in ('Pokemon','Ovo') else 'items'
-                combo.configure(values=list(catalog[group]),state='normal')
+                combo.configure(values=list(catalog.get('outfits',{})) if fields['reward_kind'].get()=='Roupa' else list(catalog[group]),state='normal')
             fields['reward_kind'].trace_add('write',choices);choices()
             entry(reward_box,'Qtd. / nivel / valor','reward_amount',2,'1')
             entry(reward_box,'Forma','reward_form',3,'0')
@@ -162,6 +164,7 @@ def main():
                     kind=fields['reward_kind'].get();amount=int(fields['reward_amount'].get());identity=fields['reward_id'].get().strip().upper()
                     if kind=='Item':row=dict(kind='item',id=identity,quantity=amount)
                     elif kind=='Dinheiro':row=dict(kind='money',amount=amount)
+                    elif kind=='Roupa':row=dict(kind='outfit',id=identity)
                     else:
                         row=dict(kind='pokemon',species=identity,level=1 if kind=='Ovo' else amount,form=int(fields['reward_form'].get()),shiny=shiny.get())
                         if kind=='Ovo':row['egg']=True

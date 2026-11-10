@@ -36,6 +36,8 @@ def package_diff(manifest):
         elif name=='Data/MapInfos.rxdata':kind='Lista de mapas'
         elif name=='Data/Tilesets.rxdata':kind='Tilesets'
         elif name=='Data/CommonEvents.rxdata':kind='Eventos comuns'
+        elif name=='Data/species.dat':kind='Pokemon: especies e formas'
+        elif name=='Data/species_metrics.dat':kind='Pokemon: posicao dos sprites'
         elif name.startswith('Data/'):kind='Dados dos mapas'
         rows.append(dict(name=f'{kind}: {name}',change='Novo' if item['base_sha256'] is None else 'Alterado',before='Ausente' if item['base_sha256'] is None else 'Na base do APK',after=f"{item['size']:,} bytes"))
     return rows

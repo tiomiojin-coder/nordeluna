@@ -84,7 +84,7 @@ Marshal.dump(bundle).unpack1('H*')
     for name,body in changes.items():(path.parent/name).write_text(body,encoding='utf-8')
 
 
-def stage(game, output):
+def stage(game, output,code=130):
     files = inventory(game)
     for name in ('Game.exe', 'RGSS104E.dll', 'x64-msvcrt-ruby310.dll', 'zlib1.dll'):
         path = game / name
@@ -121,7 +121,7 @@ def stage(game, output):
     copied.append('Data/PCContentBase.json')
     spec=importlib.util.spec_from_file_location('launcher_builder',ROOT/'scripts/build-client-launcher.py')
     launcher=importlib.util.module_from_spec(spec);spec.loader.exec_module(launcher)
-    launcher.build(output)
+    launcher.build(output,code)
     manifest = {'created': datetime.now(timezone.utc).isoformat(), 'content_base': public['base'],
         'files': {name: digest(output / name) for name in copied}}
     (output / 'pc-package.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -133,6 +133,7 @@ def main():
     parser.add_argument('--game', type=Path, default=DEFAULT_GAME)
     parser.add_argument('--compiler', type=Path, default=ROOT / '.cache/inno/compiler/ISCC.exe')
     parser.add_argument('--version', default='1.3.0')
+    parser.add_argument('--code',type=int,default=130)
     args = parser.parse_args()
     if not re.fullmatch(r'\d+\.\d+\.\d+(?:\.\d+)?', args.version):
         parser.error('Use uma versão numérica, como 1.0.0.')
@@ -141,7 +142,7 @@ def main():
     # Unique build directory: do not recursively remove existing output or player data.
     staging = ROOT / 'build/pc' / ('source-' + datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f'))
     print('Preparando cópia de distribuição...', flush=True)
-    manifest = stage(args.game.resolve(), staging)
+    manifest = stage(args.game.resolve(), staging,args.code)
     print(f"Conferidos {len(manifest['files'])} arquivos. Compilando instalador...", flush=True)
     subprocess.run([str(args.compiler.resolve()), '/Qp', f'/DGameSource={staging}',
                     f'/DAppVersion={args.version}', str(ROOT / 'windows/Nordeluna.iss')], check=True)

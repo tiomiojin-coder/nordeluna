@@ -11,6 +11,7 @@ using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using System.Web.Script.Serialization;
 
@@ -142,41 +143,89 @@ static partial class Files {
     }
 }
 
+static class LauncherStyle {
+    public static readonly Color Background=Color.FromArgb(11,17,29),Card=Color.FromArgb(20,31,47),Ink=Color.FromArgb(235,242,250),Muted=Color.FromArgb(159,178,198),Accent=Color.FromArgb(100,224,220),Gold=Color.FromArgb(232,199,128);
+    public static GraphicsPath Shape(Rectangle r,int radius){var p=new GraphicsPath();int d=Math.Min(radius*2,Math.Min(r.Width,r.Height));p.AddArc(r.X,r.Y,d,d,180,90);p.AddArc(r.Right-d,r.Y,d,d,270,90);p.AddArc(r.Right-d,r.Bottom-d,d,d,0,90);p.AddArc(r.X,r.Bottom-d,d,d,90,90);p.CloseFigure();return p;}
+}
+sealed class LauncherCard : Panel {
+    public LauncherCard(){DoubleBuffered=true;BackColor=LauncherStyle.Card;Padding=new Padding(20);}
+    protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;using(var p=LauncherStyle.Shape(new Rectangle(0,0,Width-1,Height-1),16))using(var pen=new Pen(Color.FromArgb(43,62,81)))e.Graphics.DrawPath(pen,p);}
+}
+sealed class LauncherAction : Button {
+    public bool Primary,Full;bool hover;
+    public LauncherAction(){FlatStyle=FlatStyle.Flat;FlatAppearance.BorderSize=0;Cursor=Cursors.Hand;DoubleBuffered=true;UseVisualStyleBackColor=false;}
+    protected override void OnMouseEnter(EventArgs e){hover=true;Invalidate();base.OnMouseEnter(e);}
+    protected override void OnMouseLeave(EventArgs e){hover=false;Invalidate();base.OnMouseLeave(e);}
+    protected override void OnGotFocus(EventArgs e){base.OnGotFocus(e);Invalidate();}
+    protected override void OnLostFocus(EventArgs e){base.OnLostFocus(e);Invalidate();}
+    protected override void OnPaint(PaintEventArgs e){
+        e.Graphics.Clear(Parent.BackColor);e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;
+        var r=new Rectangle(1,1,Width-3,Height-3);Color fill=Primary?LauncherStyle.Accent:(hover?Color.FromArgb(38,61,78):Color.FromArgb(27,43,61));
+        using(var p=LauncherStyle.Shape(r,12))using(var brush=new SolidBrush(Enabled?fill:Color.FromArgb(31,42,54)))using(var pen=new Pen(Focused?LauncherStyle.Gold:Color.FromArgb(49,71,89),Focused?2:1)){e.Graphics.FillPath(brush,p);e.Graphics.DrawPath(pen,p);}
+        string[] lines=Text.Split('\n');Color ink=Enabled?(Primary?LauncherStyle.Background:LauncherStyle.Ink):LauncherStyle.Muted;float scale=e.Graphics.DpiX/96f;int pad=(int)(16*scale);
+        using(var title=new Font(Font.FontFamily,Primary?14:10.5f,FontStyle.Bold))TextRenderer.DrawText(e.Graphics,lines[0],title,new Rectangle(pad,(int)((lines.Length>1?12:10)*scale),Width-pad*2,(int)(25*scale)),ink,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPrefix);
+        if(lines.Length>1)using(var small=new Font(Font.FontFamily,9))TextRenderer.DrawText(e.Graphics,lines[1],small,new Rectangle(pad,(int)(37*scale),Width-pad*2,(int)(19*scale)),Primary?Color.FromArgb(25,78,85):LauncherStyle.Muted,TextFormatFlags.Left|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPrefix);
+    }
+}
+sealed class LauncherProgress : ProgressBar {
+    public LauncherProgress(){SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer,true);}
+    protected override void OnPaint(PaintEventArgs e){e.Graphics.Clear(Color.FromArgb(32,51,69));if(Value>0)using(var brush=new SolidBrush(LauncherStyle.Accent))e.Graphics.FillRectangle(brush,0,0,Width*Value/100,Height);}
+}
 partial class Launcher : Form {
     readonly string root=AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
     readonly string home=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Pokemon Nordeluna");
     const string DefaultCatalog="https://raw.githubusercontent.com/tiomiojin-coder/nordeluna/main/public/launcher/releases.json";
     Dictionary<string,object> preferences;ComboBox channel;Label status;TextBox news;ProgressBar progress;FlowLayoutPanel buttons;bool busy,configureOnly;Process game;
+    Label newsVersion;string fullNews="As novidades aparecem ao consultar uma versão publicada.";
     string Channel {get{return channel.SelectedIndex==1?"testers":"stable";}}
     string Data {get{return Path.Combine(home,"player-data",Channel);}}
     string BackupDir {get{return Path.Combine(home,"player-backups",Channel);}}
     string GameRoot {get{return Channel=="stable"?root:Path.Combine(home,"channels/testers/game");}}
     string SettingsPath {get{return Path.Combine(home,"launcher.json");}}
     public Launcher(){
-        Text="Pokémon Nordeluna";ClientSize=new Size(800,600);MinimumSize=new Size(650,530);StartPosition=FormStartPosition.CenterScreen;BackColor=Color.FromArgb(12,20,35);ForeColor=Color.White;Font=new Font("Segoe UI",10);
-        try{Icon=new Icon(Path.Combine(root,"Nordeluna.ico"));}catch{}
+        Text="Pokémon Nordeluna";ClientSize=new Size(Math.Min(960,Screen.PrimaryScreen.WorkingArea.Width-80),Math.Min(760,Screen.PrimaryScreen.WorkingArea.Height-80));MinimumSize=new Size(820,680);AutoScaleMode=AutoScaleMode.Dpi;StartPosition=FormStartPosition.CenterScreen;BackColor=LauncherStyle.Background;ForeColor=LauncherStyle.Ink;Font=new Font("Segoe UI",10);DoubleBuffered=true;
+        try{Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath);}catch{}
         try{preferences=File.Exists(SettingsPath)?Files.Parse(Files.Read(SettingsPath)):new Dictionary<string,object>();}catch{preferences=new Dictionary<string,object>();}
-        var layout=new TableLayoutPanel { Dock=DockStyle.Fill,Padding=new Padding(26),ColumnCount=1,RowCount=7 };layout.RowStyles.Add(new RowStyle(SizeType.Absolute,50));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,36));layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,100));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,50));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,25));Controls.Add(layout);
-        layout.Controls.Add(new Label{Text="POKÉMON NORDELUNA",Font=new Font(Font.FontFamily,23,FontStyle.Bold),ForeColor=Color.FromArgb(112,224,231),Dock=DockStyle.Fill});
-        channel=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,Width=250};channel.Items.AddRange(new object[]{"Estável","Testers · saves separados"});channel.SelectedIndex=Files.Str(preferences,"channel")=="testers"?1:0;channel.SelectedIndexChanged+=(s,e)=>{preferences["channel"]=Channel;Files.Save(SettingsPath,preferences);};layout.Controls.Add(channel);
-        news=new TextBox{Multiline=true,ReadOnly=true,BorderStyle=BorderStyle.None,BackColor=Color.FromArgb(19,32,49),ForeColor=ForeColor,Dock=DockStyle.Fill,ScrollBars=ScrollBars.Vertical,Text="Bem-vindo a Nordeluna. Confira novidades e atualizações antes de jogar. Você também pode jogar offline."};layout.Controls.Add(news);
-        buttons=new FlowLayoutPanel{Dock=DockStyle.Fill,AutoScroll=true};layout.Controls.Add(buttons);Button("JOGAR",Play);Button("Atualizar",()=>CheckUpdates(true));Button("Reparar",RepairInstallation);Button("Backups",Backups);Button("Configurações",Settings);Button("Diagnóstico",Diagnostics);Button("Trocar convite",ResetTester);
-        status=new Label{Dock=DockStyle.Fill,Text="Pronto para jogar • launcher 1.1.1"};layout.Controls.Add(status);progress=new ProgressBar{Dock=DockStyle.Fill};layout.Controls.Add(progress);
+        var layout=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new Padding(24),ColumnCount=2,RowCount=3};layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,54));layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,46));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,112));layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,88));Controls.Add(layout);
+        var header=new Panel{Dock=DockStyle.Fill};layout.Controls.Add(header,0,0);layout.SetColumnSpan(header,2);
+        var logo=new PictureBox{Location=new Point(0,8),Size=new Size(80,80),SizeMode=PictureBoxSizeMode.Zoom};using(var asset=typeof(Launcher).Assembly.GetManifestResourceStream("Nordeluna.Brand")){if(asset!=null)using(var image=Image.FromStream(asset))logo.Image=new Bitmap(image);else if(Icon!=null)logo.Image=Icon.ToBitmap();}logo.Disposed+=(s,e)=>{if(logo.Image!=null)logo.Image.Dispose();};header.Controls.Add(logo);
+        header.Controls.Add(new Label{Text="POKÉMON",Location=new Point(98,8),Size=new Size(280,22),ForeColor=LauncherStyle.Gold,Font=new Font(Font.FontFamily,10,FontStyle.Bold)});
+        header.Controls.Add(new Label{Text="NORDELUNA",Location=new Point(94,27),Size=new Size(420,42),Font=new Font(Font.FontFamily,27,FontStyle.Bold)});
+        header.Controls.Add(new Label{Text="Sua próxima aventura começa aqui.",Location=new Point(98,74),Size=new Size(440,24),ForeColor=LauncherStyle.Muted});
+        var actionCard=new LauncherCard{Dock=DockStyle.Fill,Margin=new Padding(0,8,12,8)};layout.Controls.Add(actionCard,0,1);
+        var actionLayout=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=3};actionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute,26));actionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute,44));actionLayout.RowStyles.Add(new RowStyle(SizeType.Percent,100));actionCard.Controls.Add(actionLayout);
+        actionLayout.Controls.Add(new Label{Text="CANAL DA AVENTURA",ForeColor=LauncherStyle.Muted,Dock=DockStyle.Fill,Font=new Font(Font.FontFamily,9,FontStyle.Bold)});
+        channel=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,Dock=DockStyle.Top,FlatStyle=FlatStyle.Flat,BackColor=Color.FromArgb(28,44,61),ForeColor=LauncherStyle.Ink,AccessibleName="Canal do jogo",DrawMode=DrawMode.OwnerDrawFixed,ItemHeight=28};channel.DrawItem+=(s,e)=>{if(e.Index<0)return;using(var brush=new SolidBrush(Color.FromArgb(28,44,61)))e.Graphics.FillRectangle(brush,e.Bounds);TextRenderer.DrawText(e.Graphics,channel.Items[e.Index].ToString(),Font,new Rectangle(e.Bounds.X+8,e.Bounds.Y,e.Bounds.Width-8,e.Bounds.Height),LauncherStyle.Ink,TextFormatFlags.Left|TextFormatFlags.VerticalCenter);e.DrawFocusRectangle();};channel.Items.AddRange(new object[]{"Estável","Testers · saves separados"});channel.SelectedIndex=Files.Str(preferences,"channel")=="testers"?1:0;channel.SelectedIndexChanged+=(s,e)=>{preferences["channel"]=Channel;Files.Save(SettingsPath,preferences);};actionLayout.Controls.Add(channel);
+        buttons=new FlowLayoutPanel{Dock=DockStyle.Fill,AutoScroll=true,Padding=new Padding(0),Margin=new Padding(0)};actionLayout.Controls.Add(buttons);
+        Button("JOGAR\nContinuar sua aventura",Play,true,true);Button("Atualizar\nConferir novidades e downloads",()=>CheckUpdates(true),false,true);Button("Reparar\nConferir arquivos",RepairInstallation);Button("Backups\nRestaurar progresso",Backups);Button("Configurações\nTela, áudio e controles",Settings);Button("Diagnóstico\nConexão e relatórios",Diagnostics);Button("Acesso de tester\nGerenciar convite",ResetTester,false,true);
+        buttons.SizeChanged+=(s,e)=>{foreach(LauncherAction b in buttons.Controls)b.Width=Math.Max(100,b.Full?buttons.ClientSize.Width-22:(buttons.ClientSize.Width-30)/2);};
+        var updates=new LauncherCard{Dock=DockStyle.Fill,Margin=new Padding(0,8,0,8)};layout.Controls.Add(updates,1,1);
+        var updatesLayout=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=5};updatesLayout.RowStyles.Add(new RowStyle(SizeType.Absolute,34));updatesLayout.RowStyles.Add(new RowStyle(SizeType.Absolute,104));updatesLayout.RowStyles.Add(new RowStyle(SizeType.Absolute,30));updatesLayout.RowStyles.Add(new RowStyle(SizeType.Percent,100));updatesLayout.RowStyles.Add(new RowStyle(SizeType.Absolute,46));updates.Controls.Add(updatesLayout);
+        updatesLayout.Controls.Add(new Label{Text="Novidades de Nordeluna",Dock=DockStyle.Fill,ForeColor=LauncherStyle.Accent,Font=new Font(Font.FontFamily,16,FontStyle.Bold)});
+        var feature=new PictureBox{Dock=DockStyle.Fill,SizeMode=PictureBoxSizeMode.Zoom,BackColor=LauncherStyle.Background,AccessibleName="Pokémon Nordeluna"};if(logo.Image!=null)feature.Image=new Bitmap(logo.Image);feature.Disposed+=(s,e)=>{if(feature.Image!=null)feature.Image.Dispose();};updatesLayout.Controls.Add(feature);
+        newsVersion=new Label{Text="NOVIDADES",Dock=DockStyle.Fill,ForeColor=LauncherStyle.Gold};updatesLayout.Controls.Add(newsVersion);
+        news=new TextBox{Multiline=true,ReadOnly=true,BorderStyle=BorderStyle.None,BackColor=LauncherStyle.Card,ForeColor=LauncherStyle.Ink,Dock=DockStyle.Fill,ScrollBars=ScrollBars.None,AccessibleName="Novidades do jogo",Text="Bem-vindo a Nordeluna.\r\n\r\nSuas novidades aparecem aqui.\r\nSem internet? O canal estável permite continuar sua aventura offline."};news.SizeChanged+=(s,e)=>AdjustNewsScroll();news.TextChanged+=(s,e)=>AdjustNewsScroll();updatesLayout.Controls.Add(news);
+        var readMore=new LauncherAction{Text="Ler todas as novidades",Dock=DockStyle.Fill,Height=42,Font=Font,AccessibleName="Ler todas as novidades"};readMore.Click+=(s,e)=>ShowNews();updatesLayout.Controls.Add(readMore);
+        var footer=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=2,Padding=new Padding(2,12,2,4)};footer.RowStyles.Add(new RowStyle(SizeType.Percent,100));footer.RowStyles.Add(new RowStyle(SizeType.Absolute,8));layout.Controls.Add(footer,0,2);layout.SetColumnSpan(footer,2);
+        status=new Label{Dock=DockStyle.Fill,Text="Pronto para jogar • seus saves ficam separados por canal",ForeColor=LauncherStyle.Muted,AutoEllipsis=true};footer.Controls.Add(status);progress=new LauncherProgress{Dock=DockStyle.Fill,AccessibleName="Progresso da operação"};footer.Controls.Add(progress);
         FormClosing+=(s,e)=>{if(busy||game!=null&&!game.HasExited){e.Cancel=true;MessageBox.Show("Finalize o jogo ou a atualização antes de fechar o launcher.");}};
         Shown+=async(s,e)=>{try{Files.Recover(root);string tester=Path.Combine(home,"channels/testers/game");if(Directory.Exists(tester))Files.Recover(tester);}catch(Exception ex){MessageBox.Show("Recuperação pendente: "+ex.Message);buttons.Enabled=false;return;}
             string interrupted=Path.Combine(home,"session.json");if(File.Exists(interrupted)){Files.Save(Path.Combine(home,"last-crash.json"),new{ reason="Sessão anterior não terminou normalmente",time=DateTime.UtcNow.ToString("o") });File.Delete(interrupted);}
             if(File.Exists(Path.Combine(home,"last-crash.json"))&&MessageBox.Show("O jogo foi interrompido anteriormente. Exportar diagnóstico sem saves ou dados de login?","Diagnóstico",MessageBoxButtons.YesNo)==DialogResult.Yes)await Diagnostics();await CheckUpdates(false);
         };
     }
-    void Button(string text,Func<Task> action){var button=new Button{Text=text,AutoSize=true,Height=40,FlatStyle=FlatStyle.Flat,BackColor=Color.FromArgb(29,55,73),Padding=new Padding(8),Margin=new Padding(4)};button.Click+=async(s,e)=>await action();buttons.Controls.Add(button);}
+    void Button(string text,Func<Task> action,bool primary=false,bool full=false){var button=new LauncherAction{Text=text,Primary=primary,Full=full,Width=full?400:190,Height=66,Margin=new Padding(4),Font=Font,AccessibleName=text.Replace('\n',' ')};button.Click+=async(s,e)=>await action();buttons.Controls.Add(button);}
+    void AdjustNewsScroll(){if(news.ClientSize.Width<24||news.ClientSize.Height<24)return;int height=TextRenderer.MeasureText(news.Text,news.Font,new Size(news.ClientSize.Width-20,int.MaxValue),TextFormatFlags.WordBreak|TextFormatFlags.TextBoxControl).Height;var bar=height>news.ClientSize.Height?ScrollBars.Vertical:ScrollBars.None;if(news.ScrollBars!=bar)news.ScrollBars=bar;}
+    void SetNews(string version,string notes){fullNews=notes;newsVersion.Text="VERSÃO "+version;var lines=notes.Split(new[]{'\r','\n'},StringSplitOptions.RemoveEmptyEntries).Select(x=>x.Trim().TrimStart('-','*','•',' ')).Where(x=>x.Length>0).Take(3);news.Text=String.Join("\r\n\r\n",lines.Select(x=>"• "+x));}
+    void ShowNews(){using(var dialog=new Form{Text=newsVersion.Text+" — novidades",Size=new Size(620,480),StartPosition=FormStartPosition.CenterParent,BackColor=LauncherStyle.Card,ForeColor=LauncherStyle.Ink,Font=Font}){dialog.Controls.Add(new TextBox{Multiline=true,ReadOnly=true,Text=fullNews,Dock=DockStyle.Fill,ScrollBars=ScrollBars.Vertical,BackColor=LauncherStyle.Card,ForeColor=LauncherStyle.Ink,BorderStyle=BorderStyle.None});dialog.ShowDialog(this);}}
     async Task Work(Func<Task> action){if(busy)return;busy=true;buttons.Enabled=false;channel.Enabled=false;try{await action();}catch(Exception ex){status.Text="Não foi possível concluir: "+ex.Message;}finally{busy=false;buttons.Enabled=true;channel.Enabled=true;}}
-    void Progress(string text,int percent){BeginInvoke((Action)(()=>{status.Text=text+" • "+percent+"%";progress.Value=Math.Max(0,Math.Min(100,percent));}));}
+    void Progress(string text,int percent){BeginInvoke((Action)(()=>{status.Text=text+" • "+percent+"%";progress.Value=Math.Max(0,Math.Min(100,percent));progress.Invalidate();}));}
     async Task CheckUpdates(bool interactive){string requestedChannel=Channel;Func<Task> operation=async()=>{
         status.Text="Consultando novidades...";var catalog=await ChannelCatalog(interactive);
         if(IsDisposed||(!interactive&&busy)||requestedChannel!=Channel)return;
         var channels=Files.Obj(catalog["channels"]);if(!channels.ContainsKey(Channel))throw new IOException("Este canal ainda não tem uma versão publicada");var selected=Files.Obj(channels[Channel]);if(!selected.ContainsKey("windows"))throw new IOException("Nenhuma versão Windows neste canal");var row=Files.Obj(selected["windows"]);
         string local=Path.Combine(GameRoot,"installed-client.json");int code=File.Exists(local)?Files.Num(Files.Parse(Files.Read(local)),"code"):LauncherKeys.Code;
-        news.Text=Files.Str(row,"notes","Sem notas de versão");if(selected.ContainsKey("android")&&Files.Str(Files.Obj(selected["android"]),"compatibility")!=Files.Str(row,"compatibility"))news.AppendText("\r\nAtenção: PC e Android publicados possuem versões online diferentes.");
+        string notes=Files.Str(row,"notes","Sem notas de versão");if(selected.ContainsKey("android")&&Files.Str(Files.Obj(selected["android"]),"compatibility")!=Files.Str(row,"compatibility"))notes+="\r\nAtenção: PC e Android publicados possuem versões online diferentes.";SetNews(Files.Str(row,"version"),notes);
         bool newer=Files.Num(row,"code")>code||!File.Exists(Path.Combine(GameRoot,"Game.exe"));status.Text=newer?"Atualização disponível: "+Files.Str(row,"version"):"Jogo atualizado";
         if(interactive&&(newer||Channel=="testers")&&MessageBox.Show((newer?"Baixar e aplicar a versão ":"Reinstalar a versão de testes ")+Files.Str(row,"version")+"? O jogo deve permanecer fechado.","Atualização completa",MessageBoxButtons.YesNo)==DialogResult.Yes){string target=GameRoot,data=Data,backups=BackupDir,ch=Channel;await Task.Run(()=>{Files.Backup(data,backups,ch);string zip=DownloadChannel(row,Path.Combine(home,"downloads",ch));if(ch=="testers")TesterAccess.Call(new Dictionary<string,object>{{"action","tester_access"},{"tester",testerCredentials}});Files.Apply(zip,target,Progress);Files.Save(Path.Combine(target,"installed-client.json"),row);});status.Text="Atualização concluída. Pode jogar.";}
     };if(interactive)await Work(operation);else try{await operation();}catch{if(!IsDisposed&&!busy)status.Text="Sem novidades disponíveis agora. Você pode jogar offline.";}}

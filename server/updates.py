@@ -13,13 +13,15 @@ CHUNK=16384
 MAX_PACK=32*1024*1024
 MAX_FILE=16*1024*1024
 DIGEST_INFO=bytes.fromhex('3031300d060960864801650304020105000420')
+SPECIES_FILES = ('Data/species.dat', 'Data/species_metrics.dat')
+DATABASE_FILES = SPECIES_FILES + ('Data/types.dat','Data/abilities.dat','Data/moves.dat','Data/items.dat','Data/regional_dexes.dat')
 
 
 def allowed_path(path):
     if not isinstance(path,str) or len(path)>220 or '\\' in path or ':' in path or any(ord(c)<32 for c in path):return False
     parts=path.split('/')
     if any(not p or p in ('.','..') or p.startswith('.') or p.endswith((' ','.')) for p in parts):return False
-    if path in ('Data/MapInfos.rxdata','Data/Tilesets.rxdata','Data/CommonEvents.rxdata','Data/map_metadata.dat','Data/map_connections.dat','Data/encounters.dat'):return True
+    if path in DATABASE_FILES or path in ('Data/MapInfos.rxdata','Data/Tilesets.rxdata','Data/CommonEvents.rxdata','Data/map_metadata.dat','Data/map_connections.dat','Data/encounters.dat'):return True
     if re.fullmatch(r'Data/Map[0-9]{3,6}\.rxdata',path):return True
     suffix=PurePosixPath(path).suffix.lower()
     return (parts[0]=='Graphics' and len(parts)>=3 and suffix in ('.png','.jpg','.jpeg')) or (parts[0]=='Audio' and len(parts)>=3 and suffix in ('.ogg','.mp3','.wav','.mid','.midi')) or (parts[0]=='Movies' and len(parts)>=2 and suffix=='.mp4')
@@ -78,7 +80,12 @@ class UpdateService:
     def update_action(self,request):
         tester=self.update_is_tester(request)
         if request['action']=='update_manifest':
-            row=self.db.execute("SELECT p.manifest,p.signature,COALESCE(r.channel,'stable') FROM update_packages p LEFT JOIN update_releases r ON r.version=p.version WHERE p.base=? AND (COALESCE(r.channel,'stable')='stable' OR ?) ORDER BY p.version DESC LIMIT 1",(str(request.get('base'))[:32],tester)).fetchone()
+            rows=self.db.execute("SELECT p.manifest,p.signature,COALESCE(r.channel,'stable') FROM update_packages p LEFT JOIN update_releases r ON r.version=p.version WHERE p.base=? AND (COALESCE(r.channel,'stable')='stable' OR ?) ORDER BY p.version DESC",(str(request.get('base'))[:32],tester)).fetchall()
+            def supported(row):
+                paths={f['path'] for f in json.loads(row[0])['files']}
+                if paths.intersection(set(DATABASE_FILES)-set(SPECIES_FILES)) and request.get('database_updates')!=1:return False
+                return request.get('species_updates')==1 or not paths.intersection(SPECIES_FILES)
+            row=next((r for r in rows if supported(r)),None)
             return dict(manifest=row[0],signature=row[1],channel=row[2]) if row else dict(manifest=None)
         check(request['action']=='update_chunk','Acao de atualizacao desconhecida.')
         version,blob,part=request.get('version'),request.get('blob'),request.get('part')
@@ -100,7 +107,7 @@ class UpdateService:
     def update_admin(self,request):
         with self.lock,self.db:
             action=request.get('action')
-            if action=='capabilities':return dict(tester_releases=True)
+            if action=='capabilities':return dict(tester_releases=True,species_updates=True,database_updates=True)
             if action in ('testers_get','testers_set'):
                 if action=='testers_set':
                     names=request.get('testers')

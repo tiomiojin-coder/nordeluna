@@ -7,6 +7,10 @@ import android.content.pm.*;
 import android.net.Uri;
 import android.provider.Settings;
 import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
+import android.content.res.ColorStateList;
 import android.view.*;
 import android.widget.*;
 import java.io.*;
@@ -23,7 +27,10 @@ public final class ClientLauncher extends Activity {
     public static volatile boolean gameRunning=false;
     private static final String PREFS="nordeluna_client_launcher";
     private LinearLayout content;private TextView status,news;private ProgressBar progress;
+    private TextView newsVersion;private String fullNews="As novidades aparecem ao consultar uma versão publicada.";
     private Spinner channels;private boolean busy;private File pendingApk;
+    private final ArrayList<Button> launchActions=new ArrayList<>();
+    private static final int BG=Color.rgb(11,17,29),CARD=Color.rgb(20,31,47),INK=Color.rgb(235,242,250),MUTED=Color.rgb(159,178,198),ACCENT=Color.rgb(100,224,220),GOLD=Color.rgb(232,199,128);
     private final android.os.Handler handler=new android.os.Handler(android.os.Looper.getMainLooper());
     private android.content.SharedPreferences prefs(){return getSharedPreferences(PREFS,MODE_PRIVATE);}
     private String ownChannel(){return getPackageName().endsWith(".testers")?"testers":"stable";}
@@ -58,25 +65,53 @@ public final class ClientLauncher extends Activity {
         setTheme(android.R.style.Theme_Material_NoActionBar);
         if(gameRunning){super.onCreate(state);startActivity(new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));finish();return;}
         if(getIntent().getBooleanExtra("open_own_channel",false))prefs().edit().putString("channel",ownChannel()).apply();
-        super.onCreate(state);getWindow().setStatusBarColor(Color.rgb(12,20,35));getWindow().setNavigationBarColor(Color.rgb(12,20,35));
+        super.onCreate(state);getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
         String invited=getIntent().getStringExtra("tester_credentials");
         if(ownChannel().equals("testers")&&invited!=null&&invited.length()<1024)prefs().edit().putString("tester_credentials",invited).commit();
-        ScrollView scroll=new ScrollView(this);content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(28,24,28,28);content.setBackgroundColor(Color.rgb(12,20,35));scroll.addView(content);setContentView(scroll);
-        TextView title=label("POKÉMON NORDELUNA",26);title.setTextColor(Color.rgb(112,224,231));
-        label("Seu jogo, suas aventuras",15);channels=new Spinner(this);channels.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Estável","Testers · saves separados"}));channels.setSelection(channel().equals("testers")?1:0);content.addView(channels);
+        ScrollView scroll=new ScrollView(this);scroll.setBackgroundColor(BG);scroll.setFillViewport(true);scroll.setClipToPadding(false);
+        FrameLayout frame=new FrameLayout(this);scroll.addView(frame,new ScrollView.LayoutParams(-1,-2));
+        content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(dp(20),dp(24),dp(20),dp(28));
+        int width=getResources().getConfiguration().screenWidthDp;FrameLayout.LayoutParams page=new FrameLayout.LayoutParams(width>840?dp(840):-1,-2,Gravity.TOP|Gravity.CENTER_HORIZONTAL);frame.addView(content,page);setContentView(scroll);
+        LinearLayout hero=new LinearLayout(this);hero.setGravity(Gravity.CENTER_VERTICAL);hero.setPadding(0,0,0,dp(22));content.addView(hero);
+        ImageView logo=new ImageView(this);logo.setImageDrawable(getApplicationInfo().loadIcon(getPackageManager()));logo.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);hero.addView(logo,new LinearLayout.LayoutParams(dp(64),dp(64)));
+        LinearLayout heading=new LinearLayout(this);heading.setOrientation(1);heading.setPadding(dp(16),0,0,0);hero.addView(heading,new LinearLayout.LayoutParams(0,-2,1));
+        text(heading,"POKÉMON",11,GOLD,true);text(heading,"NORDELUNA",25,INK,true);text(heading,"Sua próxima aventura começa aqui.",14,MUTED,false);
+        LinearLayout start=card();text(start,"CANAL DA AVENTURA",11,MUTED,true);
+        channels=new Spinner(this);channels.setContentDescription("Canal do jogo");channels.setBackground(tintBox(Color.rgb(28,44,61),dp(10),Color.rgb(49,71,89)));channels.setPadding(dp(12),0,dp(8),0);channels.setPopupBackgroundDrawable(tintBox(CARD,dp(12),Color.rgb(49,71,89)));channels.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Estável","Testers · saves separados"}));channels.setSelection(channel().equals("testers")?1:0);LinearLayout.LayoutParams channelSize=new LinearLayout.LayoutParams(-1,dp(52));channelSize.setMargins(0,dp(8),0,dp(14));start.addView(channels,channelSize);
         channels.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int position,long id){if(busy)return;prefs().edit().putString("channel",position==1?"testers":"stable").apply();}});
-        news=label("Confira as novidades antes de jogar. Sem internet? Você pode continuar offline.",16);
-        button("JOGAR",()->play());button("Atualizar e ver novidades",()->checkUpdates(true));
-        button("Reparar instalação",()->repairInstallation());button("Backups e restauração",()->showBackups());button("Tela, áudio e controles",()->settings());button("Diagnóstico e compatibilidade",()->diagnostics());
-        button("Acesso de tester / trocar convite",()->activateTester());
-        status=label("Versão "+BuildConfig.VERSION_NAME+" • pronto para jogar",14);progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setMax(100);content.addView(progress);
+        button(start,"JOGAR","Continuar sua aventura",true,()->play());button(start,"Atualizar","Conferir novidades e downloads",false,()->checkUpdates(true));
+        LinearLayout updates=card();text(updates,"Novidades de Nordeluna",20,ACCENT,true);
+        ImageView feature=new ImageView(this);feature.setImageDrawable(getApplicationInfo().loadIcon(getPackageManager()));feature.setScaleType(ImageView.ScaleType.FIT_CENTER);feature.setContentDescription("Pokémon Nordeluna");updates.addView(feature,new LinearLayout.LayoutParams(-1,dp(110)));
+        newsVersion=text(updates,"VERSÃO "+BuildConfig.VERSION_NAME,13,GOLD,true);news=text(updates,"Confira o que mudou antes de jogar. No canal estável, sua aventura também continua offline.",15,INK,false);news.setPadding(0,dp(12),0,dp(4));news.setTextIsSelectable(true);
+        button(updates,"Ler todas as novidades","Histórico desta atualização",false,()->showNews());
+        LinearLayout tools=card();text(tools,"DO SEU JEITO",11,MUTED,true);
+        boolean columns=width>=600&&getResources().getConfiguration().fontScale<=1.3f;
+        LinearLayout row=actionRow(tools);
+        button(row,"Configurações","Tela, áudio e controles",false,()->settings());
+        if(!columns)row=actionRow(tools);button(row,"Backups","Restaurar progresso",false,()->showBackups());
+        row=actionRow(tools);button(row,"Reparar","Conferir arquivos",false,()->repairInstallation());
+        if(!columns)row=actionRow(tools);button(row,"Diagnóstico","Conexão e relatórios",false,()->diagnostics());
+        button(tools,"Acesso de tester","Ativar ou trocar convite",false,()->activateTester());
+        status=label("Versão "+BuildConfig.VERSION_NAME+" • pronto para jogar",13);status.setTextColor(MUTED);status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setMax(100);progress.setProgressTintList(ColorStateList.valueOf(ACCENT));progress.setIndeterminateTintList(ColorStateList.valueOf(ACCENT));progress.setVisibility(View.GONE);content.addView(progress,new LinearLayout.LayoutParams(-1,dp(5)));
         CrashDiagnostics.install(this,()->handler.post(()->{if(!isFinishing()&&CrashDiagnostics.hasUnseenReport(this))new AlertDialog.Builder(this).setTitle("O jogo foi interrompido").setMessage("Existe um diagnóstico do fechamento anterior. Você pode exportar um resumo sem saves ou dados de login.").setPositiveButton("Exportar",(d,w)->exportReport()).setNegativeButton("Depois",null).show();}));
         checkUpdates(getIntent().getBooleanExtra("check_update",false));
     }
-    private TextView label(String text,int size){TextView v=new TextView(this);v.setText(text);v.setTextSize(size);v.setTextColor(Color.rgb(231,240,251));v.setPadding(4,8,4,12);content.addView(v);return v;}
-    private void button(String text,Runnable action){Button b=new Button(this);b.setText(text);b.setAllCaps(false);b.setMinHeight(56);b.setFocusable(true);b.setOnClickListener(v->{if(!busy)action.run();});content.addView(b,new LinearLayout.LayoutParams(-1,-2));}
-    private void work(Work task){if(busy)return;busy=true;channels.setEnabled(false);new Thread(()->{try{task.run();}catch(Exception error){handler.post(()->status.setText("Não foi possível concluir: "+error.getMessage()));}finally{handler.post(()->{busy=false;channels.setEnabled(true);});}},"Nordeluna launcher").start();}
-    private void showProgress(String text,int percent){handler.post(()->{status.setText(text+" • "+percent+"%");progress.setProgress(percent);});}
+    private int dp(float value){return Math.round(value*getResources().getDisplayMetrics().density);}
+    private GradientDrawable tintBox(int color,float radius,int border){GradientDrawable box=new GradientDrawable();box.setColor(color);box.setCornerRadius(radius);box.setStroke(dp(1),border);return box;}
+    private TextView text(LinearLayout parent,String value,int size,int color,boolean bold){TextView v=new TextView(this);v.setText(value);v.setTextSize(size);v.setTextColor(color);v.setTypeface(Typeface.create("sans-serif",bold?Typeface.BOLD:Typeface.NORMAL));v.setPadding(0,dp(3),0,dp(4));parent.addView(v,new LinearLayout.LayoutParams(-1,-2));return v;}
+    private TextView label(String value,int size){return text(content,value,size,INK,false);}
+    private LinearLayout card(){LinearLayout box=new LinearLayout(this);box.setOrientation(1);box.setPadding(dp(18),dp(16),dp(18),dp(16));box.setBackground(tintBox(CARD,dp(18),Color.rgb(43,62,81)));LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(-1,-2);params.bottomMargin=dp(16);content.addView(box,params);return box;}
+    private LinearLayout actionRow(LinearLayout parent){LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.HORIZONTAL);parent.addView(row,new LinearLayout.LayoutParams(-1,-2));return row;}
+    private void button(LinearLayout parent,String title,String caption,boolean primary,Runnable action){
+        Button b=new Button(this);b.setText(title+"\n"+caption);b.setAllCaps(false);b.setTextSize(primary?18:15);b.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));b.setTextColor(primary?BG:INK);b.setGravity(Gravity.CENTER_VERTICAL|Gravity.START);b.setPadding(dp(18),dp(12),dp(18),dp(12));b.setMinHeight(dp(76));b.setMinimumWidth(0);b.setStateListAnimator(null);b.setFocusable(true);b.setContentDescription(title+". "+caption);
+        GradientDrawable face=tintBox(primary?ACCENT:Color.rgb(27,43,61),dp(12),primary?ACCENT:Color.rgb(49,71,89));
+        android.graphics.drawable.StateListDrawable states=new android.graphics.drawable.StateListDrawable();states.addState(new int[]{android.R.attr.state_focused},tintBox(primary?ACCENT:Color.rgb(38,61,78),dp(12),GOLD));states.addState(new int[]{},face);b.setBackground(new RippleDrawable(ColorStateList.valueOf(Color.argb(60,232,199,128)),states,null));
+        b.setOnClickListener(v->{if(!busy)action.run();});b.setOnFocusChangeListener((v,focused)->b.setAlpha(b.isEnabled()?1f:.45f));
+        LinearLayout.LayoutParams params=parent.getOrientation()==LinearLayout.HORIZONTAL?new LinearLayout.LayoutParams(0,-2,1):new LinearLayout.LayoutParams(-1,-2);params.setMargins(dp(3),dp(7),dp(3),dp(3));parent.addView(b,params);launchActions.add(b);
+    }
+    private void work(Work task){if(busy)return;busy=true;channels.setEnabled(false);for(Button b:launchActions){b.setEnabled(false);b.setAlpha(.45f);}progress.setVisibility(View.VISIBLE);progress.setIndeterminate(true);new Thread(()->{try{task.run();}catch(Exception error){handler.post(()->status.setText("Não foi possível concluir: "+error.getMessage()));}finally{handler.post(()->{busy=false;channels.setEnabled(true);for(Button b:launchActions){b.setEnabled(true);b.setAlpha(1f);}progress.setVisibility(View.GONE);});}},"Nordeluna launcher").start();}
+    private void showProgress(String text,int percent){handler.post(()->{status.setText(text+" • "+percent+"%");progress.setIndeterminate(false);progress.setProgress(percent);});}
     private void play(){if(inviteIfNeeded())return;work(()->{
         if(channel().equals("testers"))authorizeTester();
         if(ownChannel().equals("testers")&&(testerRelease==null||ClientFiles.verifyCatalog(testerRelease.getJSONObject("catalog").toString(),LauncherKeys.MODULUS).getJSONObject("channels").getJSONObject("testers").getJSONObject("android").getInt("code")!=BuildConfig.VERSION_CODE))throw new IOException("Use Atualizar para instalar a versão de testes autorizada.");
@@ -112,6 +147,8 @@ public final class ClientLauncher extends Activity {
             handler.post(()->status.setText(repaired==0?"Instalação íntegra. Nenhum download necessário.":repaired+" arquivo(s) restaurado(s), sem baixar outro APK. Saves preservados."));
         }finally{handler.post(()->dialog.dismiss());}});
     }
+    private void setNews(String version,String notes){fullNews=notes;newsVersion.setText("VERSÃO "+version);StringBuilder summary=new StringBuilder();int count=0;for(String line:notes.split("[\\r\\n]+")){line=line.trim().replaceFirst("^[-*• ]+","");if(line.isEmpty())continue;if(count++==3)break;if(summary.length()>0)summary.append("\n\n");summary.append("• ").append(line);}news.setText(summary.toString());}
+    private void showNews(){ScrollView scroll=new ScrollView(this);TextView body=new TextView(this);body.setText(fullNews);body.setTextSize(16);body.setTextColor(INK);body.setTextIsSelectable(true);body.setPadding(dp(20),dp(16),dp(20),dp(16));scroll.setBackgroundColor(CARD);scroll.addView(body);new AlertDialog.Builder(this).setTitle(newsVersion.getText()).setView(scroll).setPositiveButton("Fechar",null).show();}
     private void settings(){
         LinearLayout panel=new LinearLayout(this);panel.setOrientation(1);panel.setPadding(24,12,24,12);
         TextView vl=new TextView(this);vl.setText("Volume do jogo");panel.addView(vl);SeekBar volume=new SeekBar(this);volume.setMax(100);volume.setProgress(prefs().getInt("volume",80));panel.addView(volume);
@@ -132,7 +169,7 @@ public final class ClientLauncher extends Activity {
         int installed=0;try{installed=getPackageManager().getPackageInfo(selectedPackage(),0).versionCode;}catch(PackageManager.NameNotFoundException ignored){}
         boolean newer=row.getInt("code")>installed;String notes=row.optString("notes","Sem notas de versão");
         String compatibility="";JSONObject pc=channel.optJSONObject("windows");if(pc!=null&&!pc.optString("compatibility").equals(row.optString("compatibility")))compatibility="\nPC e Android publicados estão em versões online diferentes.";
-        final String text=notes+compatibility;handler.post(()->{if(isFinishing()||gameRunning||!requestedChannel.equals(channel())||(!interactive&&busy))return;news.setText(text);status.setText(newer?"Atualização disponível: "+row.optString("version"):"Aplicativo atualizado • "+row.optString("version"));if(interactive&&newer)new AlertDialog.Builder(this).setTitle("Atualizar aplicativo completo?").setMessage(text+"\nO Android pedirá sua confirmação para instalar. Seus saves serão mantidos.").setPositiveButton("Baixar",(d,w)->{
+        final String text=notes+compatibility;handler.post(()->{if(isFinishing()||gameRunning||!requestedChannel.equals(channel())||(!interactive&&busy))return;setNews(row.optString("version"),text);status.setText(newer?"Atualização disponível: "+row.optString("version"):"Aplicativo atualizado • "+row.optString("version"));if(interactive&&newer)new AlertDialog.Builder(this).setTitle("Atualizar aplicativo completo?").setMessage(text+"\nO Android pedirá sua confirmação para instalar. Seus saves serão mantidos.").setPositiveButton("Baixar",(d,w)->{
             Intent other=!channel().equals(ownChannel())?getPackageManager().getLaunchIntentForPackage(selectedPackage()):null;
             if(other!=null){other.putExtra("open_own_channel",true).putExtra("check_update",true);try{trustChannelPackage();if(channel().equals("testers"))other.putExtra("tester_credentials",testerCredentials().toString());startActivity(other);}catch(Exception error){status.setText("O aplicativo deste canal não tem a assinatura oficial. O convite foi preservado.");}}else downloadApk(row);
         }).setNegativeButton("Depois",null).show();});

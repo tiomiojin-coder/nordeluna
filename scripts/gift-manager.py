@@ -35,6 +35,8 @@ def catalog(game=DEFAULT_GAME):
             match=re.fullmatch(r'\[([A-Z][A-Z0-9_]*),\s*([0-9]+)\]',line.strip())
             if match:forms.setdefault(match[1],{0}).add(int(match[2]))
     data['forms']=forms
+    path=game/'Plugins/Nordeluna Online/assets/outfits.json'
+    data['outfits']=json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
     return data
 
 

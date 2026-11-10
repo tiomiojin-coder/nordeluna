@@ -15,7 +15,8 @@ import zlib
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'scripts'))
 from updater_core import DEFAULT_GAME
-from server.updates import allowed_path,validate_manifest,verify_signature,CHUNK,DIGEST_INFO
+from server.updates import allowed_path,validate_manifest,verify_signature,CHUNK,DIGEST_INFO,SPECIES_FILES,DATABASE_FILES
+import subprocess
 
 PRIVATE=ROOT/'.cache/content-updates/private-key.json'
 BASE=ROOT/'.cache/content-updates/base.json'
@@ -114,9 +115,15 @@ def initialize(game=DEFAULT_GAME):
 def build(version,title,notes,game=DEFAULT_GAME,output=None):
     if not BASE.is_file() or not PRIVATE.is_file():raise ValueError('Prepare a base inicial antes de gerar pacotes.')
     baseline=json.loads(BASE.read_text(encoding='utf-8'));key=signing_key();files=[];blobs={}
-    expected={name:digest for name,digest in baseline.get('compatibility',compatibility(game)).items() if name!='Data/System.rxdata'}
+    # Earlier bases recorded species as immutable data. Retain their exact
+    # hashes as factory files so the first species pack never overwrites an
+    # unknown installation, and keep plugins/other tables strictly immutable.
+    for name in DATABASE_FILES:
+        digest=baseline.get('compatibility',{}).get(name)
+        if digest:baseline['files'].setdefault(name,digest)
+    expected={name:digest for name,digest in baseline.get('compatibility',compatibility(game)).items() if name!='Data/System.rxdata' and not allowed_path(name)}
     if expected!=compatibility(game):
-        raise ValueError('Plugins, scripts ou banco de especies/itens mudaram. Esta alteracao requer um APK novo; mapas e recursos podem ser enviados depois de preparar a nova base.')
+        raise ValueError('Plugins, scripts ou outras tabelas do jogo mudaram. Esta alteracao requer uma versao completa nova. Os dados compilados das especies podem ser enviados em pacotes compativeis.')
     touched_path=BASE.with_name('touched.json')
     touched=set(json.loads(touched_path.read_text(encoding='utf-8'))) if touched_path.is_file() else set()
     current=scan(game)
@@ -127,9 +134,13 @@ def build(version,title,notes,game=DEFAULT_GAME,output=None):
         if hashlib.sha256(raw).hexdigest()!=digest:raise ValueError('O jogo mudou durante a preparacao. Salve e feche o editor e tente novamente.')
         packed=zlib.compress(raw,6);blob=hashlib.sha256(packed).hexdigest()
         files.append(dict(path=name,size=len(raw),sha256=digest,blob=blob,packed_size=len(packed),base_sha256=before));blobs[blob]=packed
-    missing=set(baseline['files'])-set(current)
+    missing=(set(baseline['files'])|touched)-set(current)
     if missing:raise ValueError('Arquivos da base foram removidos. O atualizador nao apaga arquivos; restaure-os ou gere outro APK: '+', '.join(sorted(missing)[:5]))
-    if not files:raise ValueError('Nenhum mapa ou recurso mudou em relacao a base inicial.')
+    if not files:raise ValueError('Nenhum mapa, recurso ou dado compilado mudou em relacao a base inicial.')
+    if any(row['path'] in DATABASE_FILES for row in files):
+        validation=subprocess.run([sys.executable,str(ROOT/'scripts/validate-species-update.py'),'--game',str(game)],capture_output=True)
+        if validation.returncode:
+            raise ValueError('Dados dos Pokemon invalidos: '+validation.stderr.decode('utf-8',errors='replace')[-2000:])
     manifest=dict(version=version,base=baseline['base'],title=title,notes=notes,files=files)
     raw=json.dumps(manifest,ensure_ascii=False,separators=(',',':'));validate_manifest(raw)
     encoded=DIGEST_INFO+hashlib.sha256(raw.encode()).digest()
@@ -172,6 +183,10 @@ def publish_package(token,path,progress=lambda text:None,channel='testers',expec
     with manager.AdminSession(token) as session:
         capabilities=session.publish(dict(action='capabilities'),'update')
         if not capabilities.get('tester_releases'):raise ValueError('Atualize o servidor para 0.9.1 antes de publicar pacotes.')
+        if any(row['path'] in SPECIES_FILES for row in manifest['files']) and not capabilities.get('species_updates'):
+            raise ValueError('Atualize o servidor para habilitar pacotes de dados dos Pokemon.')
+        if any(row['path'] in set(DATABASE_FILES)-set(SPECIES_FILES) for row in manifest['files']) and not capabilities.get('database_updates'):
+            raise ValueError('Atualize o servidor para habilitar golpes, habilidades e itens pelo servidor.')
         begun=session.publish(dict(action='begin',manifest=raw,signature=signature,channel=channel),'update')
         if begun.get('published'):return begun
         total=sum((len(blob)+CHUNK-1)//CHUNK for blob in blobs.values());count=0
@@ -185,7 +200,7 @@ def publish_package(token,path,progress=lambda text:None,channel='testers',expec
 def make_panel(parent,root,status,token):
     import tkinter as tk
     from tkinter import ttk,filedialog
-    ttk.Label(parent,text='A base inicial ja vem preparada para o primeiro APK com atualizador.\nDepois de editar e salvar o projeto, gere um pacote cumulativo das alteracoes.\nInclui mapas, eventos dos mapas, tilesets, imagens, audio e videos compativeis.\nMudancas no motor, plugins Ruby e novas especies ainda exigem outro APK.',wraplength=900).pack(anchor='w',pady=8)
+    ttk.Label(parent,text='A base inicial ja vem preparada para o primeiro APK com atualizador.\nDepois de editar e salvar o projeto, gere um pacote cumulativo das alteracoes.\nInclui mapas, sprites, audio, videos, Pokemon, golpes, habilidades, itens, tipos e Pokedex.\nCompile os PBS antes de publicar. A Central de Publicacao automatiza tambem as versoes completas.',wraplength=900).pack(anchor='w',pady=8)
     line=ttk.Frame(parent);line.pack(fill='x',pady=10)
     ttk.Label(line,text='Versao do pacote:').pack(side='left');version=tk.StringVar(value='1');ttk.Entry(line,textvariable=version,width=9).pack(side='left',padx=8)
     ttk.Label(line,text='Titulo:').pack(side='left');title=tk.StringVar(value='Novidades de Nordeluna');ttk.Entry(line,textvariable=title,width=40).pack(side='left',padx=8)

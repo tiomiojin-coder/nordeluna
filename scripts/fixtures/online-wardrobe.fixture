@@ -1,0 +1,78 @@
+# Directional and touch input exercise the real compact home menu.
+$game_temp=AreaTemp.new(false,false,false,false);$game_map=AreaMap.new(1);$game_player=AreaPlayer.new;$scene=Scene_Map.new
+ui=NordelunaOnline::OnlineUI;channel=NordelunaOnline::MapChannel
+channel.abandon
+$hub_frames=[{keys:[Input::RIGHT]},{keys:[Input::DOWN]},{keys:[Input::USE]}]
+check(ui.home_cards==12,'D-pad could not select Loja')
+left,top,width,height=ui.bounds
+p=[left+22,top+66]
+$hub_frames=[{point:p,start:true,down:true},{point:p,down:false}]
+check(ui.home_cards==0,'touch could not select Praca')
+$hub_frames=[{keys:[Input::UP]},{keys:[Input::RIGHT]},{keys:[Input::USE]}]
+check(ui.home_cards==11 && !ui.modal? && !$game_temp.in_menu,'home cancel leaked modal state')
+[:connected,:reconnecting,:disconnected].zip(['Conectado','Reconectando','Offline']).each do |state,label|
+  channel.instance_variable_set(:@connection_state,state)
+  check(ui.connection_badge[0]==label,'connection badge wrong state')
+end
+
+# Entitlement is in the same save transaction as the gift receipt.
+wardrobe=NordelunaOnline::Wardrobe
+wardrobe.instance_variable_set(:@catalog,{'LUNAR'=>{name:'Traje lunar',outfit:2,characters:[1]}})
+module GameData::PlayerMetadata
+  def self.get(id);Struct.new(:walk_charset).new('trainer_PROTAGONIST');end
+end unless defined?(GameData::PlayerMetadata)
+class GiftFixturePlayer
+  attr_accessor :outfit,:character_ID
+end
+old_player,old_bag,old_storage=$player,$bag,$PokemonStorage
+$player=GiftFixturePlayer.new([],100);$player.outfit=0;$player.character_ID=1
+$bag=GiftFixtureBag.new;$PokemonStorage=GiftFixtureStorage.new
+$map_factory.setup(42);$game_map=$map_factory.map
+$PokemonGlobal.nordeluna_online_return=nil
+$PokemonGlobal.nordeluna_owned_outfits=nil;$PokemonGlobal.nordeluna_gift_pending=nil
+gifts=NordelunaOnline::Gifts
+gifts.prepare(fixture_gift(101,[{'kind'=>'outfit','id'=>'LUNAR'}]))
+$gift_save_fail=true
+rejects('failed save retained outfit') { gifts.deliver }
+check(wardrobe.owned.empty? && gifts.pending,'failed clothing delivery lost receipt or changed inventory')
+$gift_save_fail=false;gifts.deliver
+check(wardrobe.owned==['LUNAR'],'clothing delivery did not unlock')
+saved=Marshal.load($area_files[SaveData::FILE_PATH])
+check(saved[:global_metadata].nordeluna_owned_outfits==['LUNAR'],'outfit not in durable campaign save')
+def $game_player.refresh;end
+wardrobe.equip('LUNAR');check($player.outfit==2,'equipping did not select Essentials outfit')
+rejects('unknown clothes were accepted') { wardrobe.validate!('MISSING') }
+
+class PokemonGlobalMetadata
+  attr_accessor :flashback_active,:flashback_profile_state,:flashback_state,:flashback_return
+end
+module FlashbackSystem
+  FINISH_SE='';FADE_SPEED=1
+  def self.in_flashback?;!!$PokemonGlobal.flashback_active;end
+  def self.current_perspective;$PokemonGlobal.flashback_profile_state;end
+  def self.create_color_sprite(*args);Sprite.new;end
+  def self.fade_sprite_to(*args);end
+  def self.mark_flashback_seen(*args);end
+  def self.remove_filter;end
+  def self.transfer_player_to(*args);end
+  def self.restore_audio(*args);end
+  def self.dispose_sprite(sprite);sprite.dispose;end
+end
+$game_player.character_name='trainer_PROTAGONIST_2'
+def $game_player.character_hue;0;end
+def $game_player.character_hue=(v);end
+$game_system=Struct.new(:playing_bgm,:playing_bgs).new
+FlashbackSystem.save_return_state
+$PokemonGlobal.flashback_active=true;$PokemonGlobal.flashback_state={}
+$player.character_ID=3;$player.outfit=0
+rejects('online allowed in professor story') { wardrobe.online_allowed! }
+rejects('clothing changed during flashback') { wardrobe.equip('LUNAR') }
+rejects('direct online transport bypassed story restriction') { NordelunaOnline.request('http://fixture',{'action'=>'economy_sync'}) }
+FlashbackSystem.execute_finish
+check($player.outfit==2 && $player.character_ID==1 && !wardrobe.story?,'real FlashbackSystem did not restore protagonist outfit')
+$PokemonGlobal.flashback_profile_state=:professor
+rejects('manual professor perspective could access online') { wardrobe.online_allowed! }
+$PokemonGlobal.flashback_profile_state=nil
+$player,$bag,$PokemonStorage=old_player,old_bag,old_storage
+wardrobe.instance_variable_set(:@catalog,nil)
+'PASS: compact cards via D-pad/touch; connection states; durable clothes/rollback; real flashback restores outfit and blocks online.'

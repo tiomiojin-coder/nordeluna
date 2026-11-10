@@ -55,7 +55,7 @@ module NordelunaOnline
     def keepalive
       acquired = false
       return unless managed? && active? && @desired && !@suspended
-      return if @worker || @updating || @keeping_alive || foreground_request
+      return if @worker || @updating || @draining || @keeping_alive || foreground_request
       return if Areas.active? && !Areas.busy? && !Areas.restoring?
       return if NordelunaOnline.now < (@next_keepalive || 0)
       @keeping_alive = true
@@ -73,7 +73,9 @@ module NordelunaOnline
       if operation == :update
         signature = data["state"].reject { |key, _| key == "seq" }
         urgent = data["chat"] || data["emote"]
-        heartbeat=members<=1 ? 5.0 : POSITION_HEARTBEAT
+        # Idle players still need incoming movement/chat. Slowing this to 3-5s
+        # made a healthy connection look laggy. One in-flight request is retained.
+        heartbeat=members<=1 ? 1.5 : 0.5
         return false if !urgent && signature == @last_position_signature && NordelunaOnline.now - (@last_position_sent || -10) < heartbeat
         @last_position_signature = signature
         @last_position_sent = NordelunaOnline.now

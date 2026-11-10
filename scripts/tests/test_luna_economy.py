@@ -62,6 +62,22 @@ class LunaTests(unittest.TestCase):
             self.assertEqual(sum(r is not None for r in results),1)
             self.assertEqual(self.store.balance(self.a['id']),20)
         finally:second.db.close()
+    def test_outfit_purchase_is_durable_and_cannot_charge_twice(self):
+        config=self.store.content_admin(dict(action='get'))
+        config['content']['shop']['lunar']=dict(title='Roupa lunar',price=35,enabled=True,rewards=[dict(kind='outfit',id='LUNAR')])
+        self.store.content_admin(dict(action='set',expected_revision=config['revision'],content=config['content']))
+        self.credit(100)
+        order=secrets.token_hex(16)
+        first=self.call('economy_buy',order=order,sku='lunar')
+        self.assertEqual(first,self.call('economy_buy',order=order,sku='lunar'))
+        self.assertEqual(first['claim']['rewards'],[dict(kind='outfit',id='LUNAR')])
+        with self.assertRaisesRegex(ValueError,'ja foi comprada'):
+            self.call('economy_buy',order=secrets.token_hex(16),sku='lunar')
+        self.assertEqual(self.store.balance(self.a['id']),65)
+        restarted=relay.Store(self.path)
+        try:
+            self.assertEqual(restarted.db.execute('SELECT outfit FROM outfit_orders WHERE account=?',(self.a['id'],)).fetchone()[0],'LUNAR')
+        finally:restarted.db.close()
     def test_both_battle_results_required_and_cancel_preserves_proof(self):
         a,b=self.pair()
         with self.assertRaises(ValueError):self.call('battle_result',result=1,**self.auth(a))

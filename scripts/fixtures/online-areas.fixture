@@ -88,6 +88,50 @@ saved=Marshal.load($area_files[SaveData::FILE_PATH])
 check([saved[:map_factory].map.map_id,saved[:game_player].x,saved[:game_player].y,saved[:game_player].direction]==[42,15,22,8] && saved[:global_metadata].nordeluna_online_return==original,'original position not persisted before entry')
 check($game_map.map_id==1 && areas.active?,'player not inside plaza')
 check(! $game_player.through,'local player was made non-colliding')
+
+# Graphics.update runs the real AreaMenuFrames callback while drain is waiting.
+# A ticket completing on that frame used to be collected and cleared beneath
+# drain, whose next loop condition called nil.alive?.
+class AreaFrameCompletionTicket < RoomReplyTicket
+  def initialize(reply);super(reply);@checks=0;end
+  def alive?;@checks+=1;@checks==1;end
+end
+old_poll=channel.instance_variable_get(:@next_poll)
+channel.instance_variable_set(:@next_poll,NordelunaOnline.now+999)
+channel.instance_variable_set(:@request_started,NordelunaOnline.now)
+channel.instance_variable_set(:@worker_deadline,NordelunaOnline.now+5)
+channel.instance_variable_set(:@operation,:ping)
+channel.instance_variable_set(:@worker,AreaFrameCompletionTicket.new({'ok'=>true,'room'=>'PRACA','peers'=>[],'messages'=>[],
+  'chat_epoch'=>'drain-regression','members'=>1,'revision'=>5,'version'=>'0.6.0'}))
+channel.drain
+check(channel.active? && channel.instance_variable_get(:@worker).nil?,'frame completion during drain destroyed the online session')
+channel.instance_variable_set(:@next_poll,old_poll)
+
+# A nested frame may cancel/replace a request. Do not collect its replacement
+# or release the outer drain lock from a reentrant drain call.
+module AreaDrainFrameHook
+  def update(*args)
+    hook=$area_drain_frame_hook
+    $area_drain_frame_hook=nil
+    hook.call if hook
+    super
+  end
+end
+Graphics.singleton_class.prepend(AreaDrainFrameHook)
+replacement=RoomReplyTicket.new({'ok'=>true})
+original_ticket=AreaFrameCompletionTicket.new({'ok'=>true})
+channel.instance_variable_set(:@worker,original_ticket)
+channel.instance_variable_set(:@worker_deadline,NordelunaOnline.now+5)
+$area_drain_frame_hook=proc do
+  channel.drain
+  check(channel.instance_variable_get(:@draining),'nested drain released the outer lock')
+  original_ticket.cancel
+  channel.instance_variable_set(:@worker,replacement)
+end
+channel.drain
+check(channel.active? && channel.instance_variable_get(:@worker).equal?(replacement),'drain collected a replacement request')
+check(!channel.instance_variable_get(:@draining),'drain lock survived completion')
+channel.instance_variable_set(:@worker,nil)
 check(channel.connect('PRACA') && areas.anchor==original,'duplicate entry replaced campaign anchor')
 areas.instance_variable_set(:@busy,true)
 rejects('concurrent teleport not blocked') {channel.connect('PRACA')}
@@ -98,6 +142,8 @@ channel.update;channel.update
 sent=$area_calls.count { |r| r['action']=='map_update' }
 $area_time+=0.3;channel.update
 check($area_calls.count { |r| r['action']=='map_update' }==sent,'redundant idle movement packet sent')
+$area_time+=1.6;channel.update;channel.update
+check($area_calls.count { |r| r['action']=='map_update' }>sent,'stationary player waited too long for incoming peers/chat')
 $game_temp.in_menu=true
 16.times {$area_time+=1;Graphics.update}
 $game_temp.in_menu=false
@@ -171,6 +217,14 @@ check(ghosts.rows.empty?,'departed player remains visible')
   ghosts.clear
   check(labels.all? { |label| label.disposed? && label.bitmap.disposed? },'crowded map cycle leaked nickname resources')
 end
+# A session expiring during drain must cancel the map transition locally;
+# never post map_enter with the token that collect has just cleared.
+before_enter=$area_calls.count { |call| call['action']=='map_enter' }
+channel.instance_variable_set(:@operation,:ping)
+channel.instance_variable_set(:@worker,RoomReplyTicket.new({'ok'=>false,'error'=>'Sessao de mapa invalida.'}))
+rejects('expired session allowed a map transition') {areas.authorize(5)}
+check($area_calls.count { |call| call['action']=='map_enter' }==before_enter,'expired transition sent an invalid token')
+check(!channel.active? && !channel.instance_variable_get(:@resume_token),'expired session retained a stale resume token')
 channel.disconnect
 check($game_map.map_id==42 && [$game_player.x,$game_player.y,$game_player.direction]==[15,22,8],'disconnect did not return from market')
 check(!areas.anchor && !channel.active?,'disconnect retained social state')

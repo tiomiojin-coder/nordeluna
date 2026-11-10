@@ -114,6 +114,12 @@ chunks.append(("matchmaking handoff and cancel", (Path(__file__).resolve().paren
 chunks.append(("shop graphics, wishlist and badges", (Path(__file__).resolve().parent / "fixtures/online-shop-preview.fixture").read_text(encoding="utf-8")))
 chunks.append(("non-modal online notices", (Path(__file__).resolve().parent / "fixtures/online-notices.fixture").read_text(encoding="utf-8")))
 chunks.append(("chat moderation and terminal disconnect", (Path(__file__).resolve().parent / "fixtures/online-moderation.fixture").read_text(encoding="utf-8")))
+chunks.append(("session expiry and foreground transport", (Path(__file__).resolve().parent / "fixtures/online-session-errors.fixture").read_text(encoding="utf-8")))
+flashback=(PLUGINS/'Flashback System/002_FlashbackCore.rb').read_text(encoding='utf-8')
+for method in ('save_return_state','execute_finish'):
+    match=re.search(r'(?ms)^  def self\.'+method+r'\b.*?^  end',flashback)
+    chunks.append(('actual flashback '+method,'module FlashbackSystem\n'+match[0]+'\nend'))
+chunks.append(('wardrobe and card navigation',(Path(__file__).resolve().parent/'fixtures/online-wardrobe.fixture').read_text(encoding='utf-8')))
 state = ctypes.c_int()
 # ctypes embeds Ruby without a native Ruby main stack. Disable conservative GC
 # in this short-lived test process, as its stack scanner cannot scan Python's.
