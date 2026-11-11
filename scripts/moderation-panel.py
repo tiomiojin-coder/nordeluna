@@ -25,7 +25,8 @@ ACTION_LABELS = {'set_owner': 'Marcar como minha conta', 'grant': 'Conceder / re
                  'revoke': 'Revogar moderador', 'mute': 'Silenciar chat', 'unmute': 'Retirar silencio',
                  'kick': 'Retirar da praca por 60 segundos', 'ban': 'Banir acesso online',
                  'unban': 'Retirar ban online', 'hide_message': 'Ocultar mensagem',
-                 'restore_message': 'Restaurar mensagem', 'reset_nickname': 'Excluir / liberar nick'}
+                 'restore_message': 'Restaurar mensagem', 'reset_nickname': 'Excluir / liberar nick',
+                 'delete_tester_key': 'Excluir chave de tester'}
 
 
 class StaffAuthorizationError(ValueError):
