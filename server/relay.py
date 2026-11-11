@@ -26,8 +26,8 @@ except ModuleNotFoundError:
     from server.testers import TesterService
 
 PROTOCOL = 1
-REVISION = 17
-VERSION = "0.10.5"
+REVISION = 18
+VERSION = "0.10.6"
 FEATURES = ["friends", "invitations", "gifts", "luna_coins", "missions", "matchmaking", "community", "cosmetic_badges", "live_content", "content_updates", "tester_releases", "tester_access", "notices", "moderation", "wardrobe"]
 MAX_BODY = 262144
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -761,7 +761,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def reply(self, status, body):
         started=getattr(self,'processing_started',None)
-        if started is not None:body=dict(body,server_ms=round((time.perf_counter()-started)*1000,2))
+        # Installed PC/Android clients use an integer-only JSON codec. Timing
+        # metadata must remain readable even before players update the game.
+        if started is not None:body=dict(body,server_ms=max(0,round((time.perf_counter()-started)*1000)))
         raw = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         self.served_count+=1
         slots=getattr(self.server,'keepalive_slots',None)

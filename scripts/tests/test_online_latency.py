@@ -40,6 +40,17 @@ class LatencyTests(unittest.TestCase):
         self.assertEqual(len(set(ports)),1)
         reply,_=self.health(client);self.assertEqual(reply.getheader('Connection'),'close')
         self.health(client)
+    def test_diagnostics_remain_readable_by_installed_integer_only_clients(self):
+        def unsupported_decimal(value):
+            raise AssertionError('Installed game JSON codec cannot read decimal numbers: '+value)
+        client=self.client()
+        for method,path,request in [('GET','/health',None),('POST','/api',json.dumps(dict(protocol=1,action='health')))]:
+            client.request(method,path,request,{'Content-Type':'application/json'})
+            response=client.getresponse()
+            payload=json.loads(response.read(),parse_float=unsupported_decimal)
+            self.assertEqual(response.status,200)
+            self.assertTrue(payload['ok'])
+            self.assertIs(type(payload['server_ms']),int)
     def test_idle_pool_leaves_workers_available(self):
         for _ in range(8):self.assertEqual(self.health(self.client())[0].getheader('Connection'),'keep-alive')
         reply,_=self.health(self.client())
