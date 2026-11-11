@@ -28,6 +28,13 @@ module AreaFixtureNetwork
        'areas'=>{'plaza'=>1,'coliseum'=>5,'market'=>6}}
     when 'map_enter'
       {'map'=>data['map'],'room'=>'PRACA','revision'=>5}
+    when 'map_ping'
+      if $area_expire_entry_ping
+        $area_expire_entry_ping=false
+        raise NordelunaOnline::MapSessionExpired,'Canal de mapa expirou. Entre novamente.'
+      end
+      raise NordelunaOnline::ConnectionLost,'Servidor sem resposta durante a entrada.' if $area_fail_entry_ping
+      {'ok'=>true}
     else
       {'ok'=>true}
     end
@@ -263,6 +270,43 @@ second_identity=NordelunaOnline::Identity.credentials
 check(first_identity!=second_identity,'credentials were shared across different servers')
 $PokemonGlobal.nordeluna_online_server=original_server
 check(NordelunaOnline::Identity.credentials==first_identity,'switching servers lost original account identity')
+# Restart while confirming entry: stale presence is renewed once, preserving
+# the verified save/anchor and without opening another confirmation dialog.
+module AreaEntrySaveFault
+  def save(*args,**kwargs)
+    result=super
+    if $area_entry_drop_after_save
+      fault=$area_entry_drop_after_save;$area_entry_drop_after_save=nil
+      error=if fault==:banned
+        NordelunaOnline::ModerationError.new('BANNED','Acesso bloqueado pelo moderador.')
+      else
+        NordelunaOnline::MapSessionExpired.new('Canal de mapa expirou.')
+      end
+      NordelunaOnline::MapChannel.connection_failed(error)
+    end
+    result
+  end
+end
+Game.singleton_class.prepend(AreaEntrySaveFault)
+$area_expire_entry_ping=true;$area_confirm<<true
+join_count=$area_calls.count { |r| r['action']=='map_join' }
+check(channel.connect('PRACA'),'expired entry session was not renewed')
+check($area_calls.count { |r| r['action']=='map_join' }==join_count+2,'entry renewal looped or did not replace stale presence')
+check(areas.anchor['map']==42 && $game_map.map_id==1,'entry renewal replaced campaign anchor')
+channel.disconnect
+$area_entry_drop_after_save=:expired;$area_confirm<<true
+check(channel.connect('PRACA'),'presence lost during save was not renewed')
+check(areas.anchor['map']==42 && $game_map.map_id==1,'save-time renewal changed campaign anchor')
+channel.disconnect
+$area_entry_drop_after_save=:banned;$area_confirm<<true
+join_count=$area_calls.count { |r| r['action']=='map_join' }
+rejects('terminal moderation was bypassed by entry renewal') { channel.connect('PRACA') }
+check($area_calls.count { |r| r['action']=='map_join' }==join_count+1,'blocked player tried to rejoin automatically')
+check($game_map.map_id==42 && !areas.anchor,'moderation during save lost campaign return')
+$area_fail_entry_ping=true;$area_confirm<<true
+rejects('transport continued despite failed entry validation') { channel.connect('PRACA') }
+check($game_map.map_id==42 && !areas.anchor && !channel.active?,'failed entry validation lost campaign return')
+$area_fail_entry_ping=false
 Game.start_new
 check($area_started_new && !channel.managed? && !areas.active?,'new game retained old online session')
 check(SaveData::FILE_PATH==standard_path,'new game retained the previous adventure save slot')

@@ -33,6 +33,31 @@ module NordelunaOnline
       value
     end
 
+    # A server restart can invalidate a token while the entry confirmation or
+    # campaign save is open. Verify it before teleporting; renew presence once,
+    # without starting connect/enter again or replacing the campaign anchor.
+    def verify_entry!
+      previous = foreground_request
+      self.foreground_request = true
+      drain
+      unless managed? && desired? && !@suspended
+        raise ConnectionLost, @error || "Entrada online cancelada. Conecte novamente pela campanha."
+      end
+      if active?
+        begin
+          NordelunaOnline.request(@url, "action"=>"map_ping", "token"=>@token,
+            "after"=>@chat_cursor || 0, "chat_epoch"=>@chat_epoch)
+          return true
+        rescue MapSessionExpired
+          @token = @resume_token = nil
+        end
+      end
+      accept_join(NordelunaOnline.request(@url, join_payload))
+      true
+    ensure
+      self.foreground_request = previous
+    end
+
     def accept_join(reply)
       Areas.validate_configuration(reply)
       @area_join_reply = reply

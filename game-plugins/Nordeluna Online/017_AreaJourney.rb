@@ -123,7 +123,7 @@ module NordelunaOnline
         created_anchor = true
         checked_save!
         saved_anchor = true
-        raise ConnectionLost, "Conexao encerrada antes do transporte." unless MapChannel.active?
+        MapChannel.verify_entry!
         pbMessage(_INTL("Seu progresso foi salvo! Voce sera transportado para a Praca Central Online."))
         @inside = true
         target = { "map" => PLAZA_MAP_ID, "x" => PLAZA_ENTRY[:x], "y" => PLAZA_ENTRY[:y], "direction" => PLAZA_ENTRY[:direction] }

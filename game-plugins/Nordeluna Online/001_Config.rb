@@ -1,6 +1,6 @@
 # Shared by the Windows game and the Android port.
 module NordelunaOnline
-  VERSION = "0.11.5"
+  VERSION = "0.11.6"
   PROTOCOL = 1
   BUILD = "nordeluna-online-2026-11-09-areas2"
   DEFAULT_SERVER = "https://nordeluna-online.discloud.dev"
