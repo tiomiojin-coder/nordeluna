@@ -39,9 +39,32 @@ class TesterAccessTests(unittest.TestCase):
         invite=self.invite();credentials=self.redeem(invite)
         self.store.db.execute('UPDATE tester_access SET expires=1');self.store.db.commit()
         with self.assertRaises(ValueError):self.call('tester_access',tester=credentials)
-        for action in ('tester_admin','tester_publish','tester_create'):
+        for action in ('tester_admin','tester_publish','tester_create','tester_delete'):
             with self.assertRaises(Exception):self.call(action)
         self.assertNotIn('keys',self.call('health'))
+
+    def test_delete_invalidates_redeemed_key_without_removing_online_account(self):
+        account=dict(id=secrets.token_hex(16),secret=secrets.token_hex(32))
+        self.call('account_register',nickname='KeepCoins',account=account)
+        invitation=self.invite();credentials=self.redeem(invitation)
+        self.call('account_info',account=account,channel='testers',tester=credentials)
+        other=self.invite()
+        result=self.store.tester_admin(dict(action='delete',id=invitation['id']))
+        self.assertTrue(result['deleted'])
+        self.assertEqual([r['id'] for r in self.store.tester_admin(dict(action='list'))['invitations']],[other['id']])
+        with self.assertRaises(ValueError):self.call('tester_access',tester=credentials)
+        with self.assertRaises(ValueError):self.redeem(invitation)
+        self.assertEqual(self.call('account_info',account=account)['nickname'],'KeepCoins')
+        self.store.db.close();self.store=Store(str(self.file))
+        with self.assertRaises(ValueError):self.call('tester_access',tester=credentials)
+
+    def test_delete_unclaimed_key_does_not_affect_other_invites(self):
+        invitation=self.invite();other=self.invite()
+        with self.assertRaises(ValueError):self.store.tester_admin(dict(action='delete',id='missing'))
+        self.assertEqual(len(self.store.tester_admin(dict(action='list'))['invitations']),2)
+        self.store.tester_admin(dict(action='delete',id=invitation['id']))
+        with self.assertRaises(ValueError):self.redeem(invitation)
+        self.assertTrue(self.call('tester_access',tester=self.redeem(other))['authorized'])
 
     def test_gate_binds_online_identity_and_stable_stays_open(self):
         account=dict(id=secrets.token_hex(16),secret=secrets.token_hex(32))

@@ -26,8 +26,8 @@ except ModuleNotFoundError:
     from server.testers import TesterService
 
 PROTOCOL = 1
-REVISION = 18
-VERSION = "0.10.6"
+REVISION = 19
+VERSION = "0.10.7"
 FEATURES = ["friends", "invitations", "gifts", "luna_coins", "missions", "matchmaking", "community", "cosmetic_badges", "live_content", "content_updates", "tester_releases", "tester_access", "notices", "moderation", "wardrobe"]
 MAX_BODY = 262144
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -132,7 +132,7 @@ class Store(GiftService, EconomyService, UpdateService, ModerationService, Teste
                     abs(first.get("x", -9999) - second.get("x", 9999)) + abs(first.get("y", -9999) - second.get("y", 9999)) <= 8)
 
     def social_state(self, identity):
-        if self.moderation_status(identity)['banned']:return 'offline'
+        if self.moderation_status(identity)['banned'] or identity in self._nickname_resets:return 'offline'
         row = self.social_presence.get(identity)
         if not row or time.monotonic() - row["seen"] >= 35:
             return "offline"
@@ -300,9 +300,17 @@ class Store(GiftService, EconomyService, UpdateService, ModerationService, Teste
         identity, digest = self.credentials(request)
         row = self.db.execute("SELECT id,secret_hash,nickname FROM accounts WHERE id=?", (identity,)).fetchone()
         require(row is not None and hmac.compare_digest(row[1], digest), "Identidade online invalida. Use o save original desta conta.")
+        reset=self.db.execute('SELECT previous_nickname FROM account_nickname_resets WHERE account=?',(identity,)).fetchone()
+        # Keep old clients able to open "Meu nick" and finish existing receipts.
+        # The previous name is display-only until a different name is registered.
+        if reset:
+            require(request.get('action') in ('account_info','account_check','gift_begin','gift_ack','gift_status','gift_history','economy_order','economy_ledger'),
+                    'Seu nick foi removido pelo administrador. Abra Online > Meu nick e escolha outro nome. Sua conta, moedas e compras foram preservadas.')
         if request.get('action') not in ('account_info','account_check','gift_begin','gift_ack','gift_status','gift_history','economy_order','economy_ledger'):
             self.moderation_require_online(row[0])
-        return {"id": row[0], "nickname": row[2]}
+        result={"id": row[0], "nickname": reset[0] if reset else row[2]}
+        if reset:result['nickname_required']=True
+        return result
 
     def account_action(self, request):
         action = request["action"]
@@ -319,10 +327,14 @@ class Store(GiftService, EconomyService, UpdateService, ModerationService, Teste
         existing = self.db.execute("SELECT secret_hash FROM accounts WHERE id=?", (identity,)).fetchone()
         if existing:
             require(hmac.compare_digest(existing[0], digest), "Esta identidade pertence a outra conta.")
+            reset=self.db.execute('SELECT previous_nickname FROM account_nickname_resets WHERE account=?',(identity,)).fetchone()
+            require(not reset or normalized!=reset[0].casefold(),'Seu nick anterior foi removido pelo administrador. Escolha um nome diferente.')
         now = int(time.time())
         try:
             if existing:
                 self.db.execute("UPDATE accounts SET nickname=?,normalized=?,updated=? WHERE id=?", (nickname, normalized, now, identity))
+                self.db.execute('DELETE FROM account_nickname_resets WHERE account=?',(identity,))
+                if reset:self.moderation_bump()
             else:
                 self.db.execute("INSERT INTO accounts VALUES(?,?,?,?,?,?)", (identity, digest, nickname, normalized, now, now))
         except sqlite3.IntegrityError:

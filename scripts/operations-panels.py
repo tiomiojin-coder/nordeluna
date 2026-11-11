@@ -51,6 +51,9 @@ def make_testers(parent,root,status,token,manager,review):
                 invitations.insert('','end',iid=row['id'],values=(row['label'],state))
         if value.get('published'):status.set('Versão protegida publicada para os testers autorizados.')
         if value.get('revoked'):status.set('Acesso revogado. A próxima validação será recusada.')
+        if value.get('deleted'):status.set('Chave excluida e acesso invalidado. O convite nao pode ser recuperado.')
+        if value.get('revoked') or value.get('deleted') or 'invitation' in value:
+            root.after(0,lambda:access_run(dict(action='list')))
     access_run=worker(root,status,token,manager,'tester',access_done)
     controls=ttk.Frame(access);controls.pack(fill='x',pady=5)
     def create():
@@ -62,6 +65,14 @@ def make_testers(parent,root,status,token,manager,review):
         selected=invitations.selection()
         if selected and messagebox.askyesno('Revogar acesso','Bloquear novas entradas e downloads deste tester?',parent=root):access_run(dict(action='revoke',id=selected[0]))
     ttk.Button(controls,text='Revogar selecionado',command=revoke).pack(side='left')
+    def delete_invitation():
+        selected=invitations.selection()
+        if not selected:status.set('Selecione a chave que deseja excluir.');return
+        name=invitations.item(selected[0],'values')[0]
+        if messagebox.askyesno('Excluir chave de tester',
+                'Excluir definitivamente a chave de '+str(name)+'?\nO convite e o acesso vinculado serao invalidados. Saves e compras nao serao apagados.',parent=root):
+            access_run(dict(action='delete',id=selected[0]))
+    ttk.Button(controls,text='Excluir chave',command=delete_invitation).pack(side='left',padx=4)
     def publish_protected():
         name=filedialog.askopenfilename(parent=root,title='Publicação privada dos testers',initialdir=str(manager.ROOT/'.cache/testers'),filetypes=[('JSON','*.json')])
         if not name:return

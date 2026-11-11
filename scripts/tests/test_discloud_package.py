@@ -63,8 +63,8 @@ class DiscloudPackageTest(unittest.TestCase):
                                 self.fail("Packaged server failed to start")
                             time.sleep(0.05)
                     self.assertEqual(health["protocol"], 1)
-                    self.assertEqual(health["version"], "0.10.6")
-                    self.assertEqual(health["revision"], 18)
+                    self.assertEqual(health["version"], "0.10.7")
+                    self.assertEqual(health["revision"], 19)
                     self.assertTrue(health["ok"])
                     self.assertTrue((root / "app/data/relay.sqlite3").is_file())
                 finally:

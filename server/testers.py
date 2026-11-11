@@ -32,12 +32,18 @@ class TesterService:
                 code='NLT-'+secrets.token_hex(16).upper();identity=secrets.token_hex(16);now=int(time.time())
                 self.db.execute('INSERT INTO tester_access(id,label,code_hash,created,expires) VALUES(?,?,?,?,?)',(identity,label,digest(code),now,now+days*86400))
                 return dict(id=identity,invitation=code)  # Plain code is shown once; never stored.
-            if action=='revoke':
+            if action in ('revoke','delete'):
+                check(isinstance(request.get('id'),str) and re.fullmatch('[0-9a-f]{32}',request['id']),'Selecione um convite valido.')
                 target=self.db.execute('SELECT account FROM tester_access WHERE id=?',(request.get('id'),)).fetchone()
                 check(target,'Convite nao encontrado.')
-                self.db.execute('UPDATE tester_access SET revoked=1 WHERE id=?',(request['id'],))
+                if action=='delete':
+                    self.db.execute('DELETE FROM tester_access WHERE id=?',(request['id'],))
+                    self.db.execute('INSERT INTO moderation_audit(created,actor,actor_label,action,target,detail) VALUES(?,?,?,?,?,?)',
+                        (int(time.time()),self.moderation_owner() or 'discloud-owner','Administrador','delete_tester_key',request['id'],'Chave excluida; conta, saves e compras preservados.'))
+                else:
+                    self.db.execute('UPDATE tester_access SET revoked=1 WHERE id=?',(request['id'],))
                 if target[0]:self.db.execute('DELETE FROM update_testers WHERE account=?',(target[0],))
-                return dict(revoked=True)
+                return dict(deleted=True,id=request['id']) if action=='delete' else dict(revoked=True)
             if action=='list':
                 return dict(invitations=[dict(zip(('id','label','created','expires','revoked','claimed','account'),r)) for r in self.db.execute('SELECT id,label,created,expires,revoked,claimed,account FROM tester_access ORDER BY created DESC LIMIT 500')])
             if action=='publish':

@@ -200,6 +200,9 @@ class EconomyService(ContentService):
     def match_action(self, request):
         account=self.account(request)['id'];action=request['action'];now=time.monotonic()
         for identity,row in list(self.matchmaking.items()):
+            if identity in self._nickname_resets:
+                self.matchmaking.pop(identity,None)
+                continue
             if now-row['seen']>(120 if row.get('code') else 25):
                 self.matchmaking.pop(identity,None)
         entry=self.matchmaking.get(account)

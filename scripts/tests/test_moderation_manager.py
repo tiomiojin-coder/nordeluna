@@ -110,6 +110,17 @@ class ModerationReviewTests(unittest.TestCase):
                 panel.minutes.set(value); panel.account_action('mute')
             panel.reason.set(''); panel.account_action('ban')
         review.assert_not_called(); panel.run.assert_not_called()
+    def test_nickname_release_requires_review_and_owner_panel(self):
+        panel=self.panel();panel.owner=True
+        with patch.object(ui,'review_action',return_value=False):panel.account_action('reset_nickname')
+        panel.run.assert_not_called()
+        with patch.object(ui,'review_action',return_value=True) as review:
+            panel.account_action('reset_nickname')
+        self.assertIn('Luna Coins',review.call_args.args[2])
+        panel.run.assert_called_once_with(dict(action='reset_nickname',target=FAKE_ACCOUNT,reason='Motivo de teste'))
+        panel.run.reset_mock();panel.owner=False
+        with patch.object(ui,'review_action') as review:panel.account_action('reset_nickname')
+        review.assert_not_called();panel.run.assert_not_called()
     def test_failed_staff_auth_clears_the_session(self):
         panel = self.panel(); panel.closed = False; panel.events = queue.Queue()
         panel.events.put((False, 'Chave revogada', {'action': 'accounts'}, True))

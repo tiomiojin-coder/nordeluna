@@ -19,7 +19,7 @@ relay = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(relay)
 
 
-class ModerationTests(unittest.TestCase):
+class ModerationFixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -83,6 +83,7 @@ class ModerationTests(unittest.TestCase):
     def auth(session):
         return dict(code=session["code"], token=session["token"])
 
+class ModerationTests(ModerationFixture):
     def test_staff_key_is_separate_hashed_and_never_returned_by_reads(self):
         self.assertRegex(self.key, r"^nmod_[0-9a-f]{64}$")
         stored = self.store.db.execute("SELECT key_hash FROM moderators WHERE account=?", (self.mod["id"],)).fetchone()[0]
@@ -498,6 +499,58 @@ class ModerationTests(unittest.TestCase):
             server.shutdown()
             thread.join(timeout=3)
             server.server_close()
+
+
+class NicknameReleaseTests(ModerationFixture):
+    def test_console_process_reset_blocks_presence_in_running_server(self):
+        session=self.join_map()
+        self.update_map(session)
+        console=relay.Store(self.path,self.areas)
+        try:console.moderation_admin(dict(action='reset_nickname',target=self.player['id'],reason='Troca de nick solicitada'))
+        finally:console.db.close()
+        self.assertIn(session['token'],self.store.presence)
+        self.store._moderation_checked=0
+        with self.assertRaisesRegex(ValueError,'Meu nick'):self.update_map(session)
+        self.assertFalse(self.store.moderation_peer_allowed(self.store.presence[session['token']]))
+        self.call('account_register',nickname='NomeNovo')
+        self.update_map(session)
+
+    def test_release_preserves_account_money_orders_and_history(self):
+        identity=self.player['id']
+        old=self.call('account_info')['nickname']
+        session=self.join_map()
+        self.chat(session,'Mensagem antes de liberar o nick')
+        with self.store.db:
+            self.store.db.execute('INSERT OR REPLACE INTO wallets VALUES(?,?)',(identity,123))
+            self.store.db.execute('INSERT INTO coin_ledger VALUES(?,?,?,?)',(identity,'existing',123,1))
+            self.store.db.execute('INSERT INTO shop_orders VALUES(?,?,?,?,?)',(identity,'existing-order','egg','existing-claim',1))
+        tables=('wallets','coin_ledger','shop_orders','chat_history')
+        snapshot={name:list(self.store.db.execute('SELECT * FROM '+name)) for name in tables}
+        self.admin('reset_nickname',self.player)
+        self.assertNotIn(session['token'],self.store.presence)
+        self.assertTrue(self.call('account_info')['nickname_required'])
+        for action in ('map_join','social_sync','economy_sync'):
+            with self.assertRaisesRegex(relay.ProtocolError,'Meu nick'):self.call(action,room='PRACA',build='nick-test',profile=dict(name=old))
+        with self.assertRaises(relay.ProtocolError):self.call('account_register',nickname=old.swapcase())
+        replacement=self.register(old)
+        self.assertNotEqual(replacement['id'],identity)
+        self.restart()
+        self.assertTrue(self.call('account_info')['nickname_required'])
+        self.call('account_register',nickname='NovoNick')
+        self.assertEqual(self.call('account_info')['nickname'],'NovoNick')
+        self.assertNotIn('nickname_required',self.call('account_info'))
+        for name in tables:self.assertEqual(list(self.store.db.execute('SELECT * FROM '+name)),snapshot[name])
+        self.assertEqual(self.store.db.execute('SELECT target FROM moderation_audit WHERE action=?',('reset_nickname',)).fetchone()[0],identity)
+        self.join_map()
+
+    def test_only_owner_can_release_and_owner_is_protected(self):
+        before=self.call('account_info')['nickname']
+        with self.assertRaises(ValueError):self.staff('reset_nickname',self.player)
+        with self.assertRaises(ValueError):self.admin('reset_nickname',self.owner)
+        self.assertEqual(self.call('account_info')['nickname'],before)
+        self.admin('reset_nickname',self.player)
+        with self.assertRaises(ValueError):self.admin('reset_nickname',self.player)
+        self.assertEqual(self.store.db.execute('SELECT COUNT(*) FROM account_nickname_resets').fetchone()[0],1)
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ ACTION_LABELS = {'set_owner': 'Marcar como minha conta', 'grant': 'Conceder / re
                  'revoke': 'Revogar moderador', 'mute': 'Silenciar chat', 'unmute': 'Retirar silencio',
                  'kick': 'Retirar da praca por 60 segundos', 'ban': 'Banir acesso online',
                  'unban': 'Retirar ban online', 'hide_message': 'Ocultar mensagem',
-                 'restore_message': 'Restaurar mensagem'}
+                 'restore_message': 'Restaurar mensagem', 'reset_nickname': 'Excluir / liberar nick'}
 
 
 class StaffAuthorizationError(ValueError):
@@ -258,7 +258,7 @@ class ModerationPanel:
             self._button(actions, label, lambda a=action: self.account_action(a)).pack(side='left', padx=2)
         if self.owner:
             team = ttk.Frame(page); team.pack(fill='x', pady=3)
-            for label, action in [('Marcar como minha conta', 'set_owner'), ('Conceder / renovar chave', 'grant'), ('Revogar moderador', 'revoke')]:
+            for label, action in [('Marcar como minha conta', 'set_owner'), ('Conceder / renovar chave', 'grant'), ('Revogar moderador', 'revoke'), ('Excluir / liberar nick', 'reset_nickname')]:
                 self._button(team, label, lambda a=action: self.account_action(a)).pack(side='left', padx=2)
 
     def _make_history(self):
@@ -447,6 +447,8 @@ class ModerationPanel:
     def account_action(self, action):
         if self.busy or not self.connected:
             return
+        if action=='reset_nickname' and not self.owner:
+            self.status.set('Somente o administrador pode liberar um nick.');return
         row = self._selected_account()
         if not row:
             self.status.set('Selecione uma conta cadastrada na lista.'); return
@@ -469,6 +471,8 @@ class ModerationPanel:
                 extra = '\nEmite uma chave exclusiva de moderacao e invalida qualquer chave anterior desta conta.'
             elif action == 'revoke':
                 extra = '\nA chave desta conta perde o acesso imediatamente.'
+            elif action == 'reset_nickname':
+                extra = '\nLibera o nick para uso por outra conta e encerra a presenca na praca.\nO jogador precisara abrir Online > Meu nick e escolher outro nome.\nConta, Luna Coins, compras, saves e historico serao preservados.'
             details = f"Conta: {row['nickname']}\nID: {row['id']}\nPapel atual: {row['role']}\nMotivo: {reason}" + extra
             if review_action(self.root, ACTION_LABELS[action], details):
                 self.run(payload)

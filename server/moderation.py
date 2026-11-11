@@ -30,9 +30,10 @@ class ModerationService:
             'CREATE INDEX IF NOT EXISTS chat_account_history ON chat_history(account,id)',
             'CREATE INDEX IF NOT EXISTS moderation_target_history ON moderation_audit(target,id)',
             'CREATE TABLE IF NOT EXISTS moderation_state(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL,chat_revision INTEGER NOT NULL)',
+            'CREATE TABLE IF NOT EXISTS account_nickname_resets(account TEXT PRIMARY KEY,previous_nickname TEXT NOT NULL)',
         ):self.db.execute(sql)
         self.db.execute('INSERT OR IGNORE INTO moderation_state VALUES(1,0,0)')
-        self._moderation_checked=0;self._moderation_revision=None;self._sanctions={};self._chat_revision=0
+        self._moderation_checked=0;self._moderation_revision=None;self._sanctions={};self._chat_revision=0;self._nickname_resets=set()
 
     def moderation_refresh(self):
         now=time.monotonic()
@@ -40,6 +41,7 @@ class ModerationService:
         revision,chat_revision=self.db.execute('SELECT revision,chat_revision FROM moderation_state WHERE id=1').fetchone()
         if revision!=self._moderation_revision:
             self._sanctions.clear();self._moderation_revision=revision
+            self._nickname_resets={row[0] for row in self.db.execute('SELECT account FROM account_nickname_resets')}
         if chat_revision!=self._chat_revision:
             self.chat_rooms.clear();self._chat_revision=chat_revision
         self._moderation_checked=now+1
@@ -55,6 +57,7 @@ class ModerationService:
     def moderation_require_online(self,account):
         state=self.moderation_status(account)
         if state['banned']:raise ModerationError('BANNED','Acesso online banido. Motivo: '+state['ban_reason'])
+        if account in self._nickname_resets:raise ModerationError('NICK_REQUIRED','Seu nick foi removido pelo administrador. Abra Online > Meu nick e escolha outro nome. Sua conta, moedas e compras foram preservadas.')
 
     def moderation_require_map(self,account,room):
         self.moderation_require_online(account)
@@ -64,7 +67,7 @@ class ModerationService:
 
     def moderation_peer_allowed(self,row):
         state=self.moderation_status(row.get('account_id',''))
-        return not state['banned'] and not (row.get('room')=='PRACA' and state['kicked_until']>time.time())
+        return not state['banned'] and row.get('account_id') not in self._nickname_resets and not (row.get('room')=='PRACA' and state['kicked_until']>time.time())
 
     def moderation_require_chat(self,account):
         state=self.moderation_status(account)
@@ -109,8 +112,8 @@ class ModerationService:
                 if action=='session':return dict(actor=dict(actor))
                 return self.moderation_read(request,actor)
             if not in_transaction:self.db.execute('BEGIN IMMEDIATE')
-            check(action in ('set_owner','grant','revoke','mute','unmute','kick','ban','unban','hide_message','restore_message'),'Acao de moderacao desconhecida.')
-            if action in ('set_owner','grant','revoke'):check(actor['role']=='owner','Somente o administrador gerencia a equipe.')
+            check(action in ('set_owner','grant','revoke','reset_nickname','mute','unmute','kick','ban','unban','hide_message','restore_message'),'Acao de moderacao desconhecida.')
+            if action in ('set_owner','grant','revoke','reset_nickname'):check(actor['role']=='owner','Somente o administrador gerencia contas e equipe.')
             target=request.get('target')
             if action in ('hide_message','restore_message'):
                 identity=request.get('message_id');check(type(identity) is int and identity>0,'Selecione uma mensagem.')
@@ -134,6 +137,17 @@ class ModerationService:
                 self.db.execute('INSERT INTO moderators VALUES(?,?,1,?) ON CONFLICT(account) DO UPDATE SET key_hash=excluded.key_hash,active=1,created=excluded.created',(target,digest,int(time.time())))
                 result['moderator_key']=key
             elif action=='revoke':self.db.execute('UPDATE moderators SET active=0 WHERE account=?',(target,))
+            elif action=='reset_nickname':
+                check(not self.db.execute('SELECT 1 FROM account_nickname_resets WHERE account=?',(target,)).fetchone(),'Esta conta ja esta aguardando um novo nick.')
+                previous=self.db.execute('SELECT nickname FROM accounts WHERE id=?',(target,)).fetchone()[0]
+                self.db.execute('INSERT INTO account_nickname_resets VALUES(?,?)',(target,previous))
+                self.db.execute("UPDATE accounts SET nickname='Sem nick',normalized=?,updated=? WHERE id=?",('!removed:'+target,int(time.time()),target))
+                # End presence, not purchases, trade reservations or account ownership.
+                for pool in (self.presence,self.resumable):
+                    for token,row in list(pool.items()):
+                        if row.get('account_id')==target:pool.pop(token,None)
+                reason+=' / Nick liberado: '+previous
+                result['nickname_required']=True
             elif action in ('hide_message','restore_message'):
                 self.db.execute('UPDATE chat_history SET hidden=? WHERE id=?',(int(action=='hide_message'),request['message_id']))
                 reason=f"Mensagem #{request['message_id']}: "+reason
@@ -164,7 +178,8 @@ class ModerationService:
             result=[]
             for identity,nick,created,updated in rows:
                 state=self.db.execute('SELECT muted_until,kicked_until,banned FROM moderation_sanctions WHERE account=?',(identity,)).fetchone() or (0,0,0)
-                result.append(dict(id=identity,nickname=nick,created=created,updated=updated,role=self.moderation_role(identity),muted_until=state[0],kicked_until=state[1],banned=bool(state[2])))
+                required=bool(self.db.execute('SELECT 1 FROM account_nickname_resets WHERE account=?',(identity,)).fetchone())
+                result.append(dict(id=identity,nickname=nick,nickname_required=required,created=created,updated=updated,role=self.moderation_role(identity),muted_until=state[0],kicked_until=state[1],banned=bool(state[2])))
             return dict(accounts=result,total=self.db.execute('SELECT COUNT(*) FROM accounts').fetchone()[0],offset=offset,owner=self.moderation_owner(),actor=dict(actor))
         cursor=request.get('before',2**63-1)
         check(type(cursor) is int and 0<cursor<2**63,'Cursor invalido.')
