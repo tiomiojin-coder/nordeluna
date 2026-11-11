@@ -49,8 +49,8 @@ class DiscloudDeployTests(unittest.TestCase):
 
     def test_package_and_backup_inspection(self):
         expected = deploy.expected_package(self.package)
-        self.assertEqual(expected["VERSION"], "0.10.7")
-        self.assertEqual(expected["REVISION"], 19)
+        self.assertEqual(expected["VERSION"], "0.10.8")
+        self.assertEqual(expected["REVISION"], 20)
         self.assertEqual(expected["DEFAULT_AREAS"], dict(plaza=39, coliseum=40, market=41))
         self.assertEqual(deploy.backup_stats(self.backup, self.root / "inspect.sqlite3"),
                          dict(rooms=1, accounts=0, **{name: 1 for name in MODERATION_TABLES}))

@@ -1,5 +1,6 @@
 """Real HTTP connections: bounded pooling, framing safety and timing metadata."""
 import http.client
+import gzip
 import importlib.util
 import json
 from pathlib import Path
@@ -32,9 +33,9 @@ class LatencyTests(unittest.TestCase):
         self.assertEqual(reply.status,200);self.assertTrue(body['ok'])
         self.assertGreaterEqual(body['server_ms'],0)
         return reply,body
-    def test_reuses_socket_and_recycles_after_sixteen_responses(self):
+    def test_reuses_socket_and_recycles_after_bounded_response_budget(self):
         client=self.client();ports=[]
-        for _ in range(15):
+        for _ in range(relay.KEEPALIVE_REQUESTS-1):
             reply,_=self.health(client);self.assertEqual(reply.getheader('Connection'),'keep-alive')
             ports.append(client.sock.getsockname()[1])
         self.assertEqual(len(set(ports)),1)
@@ -52,7 +53,7 @@ class LatencyTests(unittest.TestCase):
             self.assertTrue(payload['ok'])
             self.assertIs(type(payload['server_ms']),int)
     def test_idle_pool_leaves_workers_available(self):
-        for _ in range(8):self.assertEqual(self.health(self.client())[0].getheader('Connection'),'keep-alive')
+        for _ in range(relay.PERSISTENT_CONNECTIONS):self.assertEqual(self.health(self.client())[0].getheader('Connection'),'keep-alive')
         reply,_=self.health(self.client())
         self.assertEqual(reply.getheader('Connection'),'close')
     def test_invalid_framing_closes_without_interpreting_second_request(self):
@@ -72,6 +73,22 @@ class LatencyTests(unittest.TestCase):
         client=self.client();client.request('POST','/api',json.dumps(dict(protocol=1,action='missing')),{'Content-Type':'application/json'})
         reply=client.getresponse();body=json.loads(reply.read())
         self.assertEqual(reply.status,400);self.assertFalse(body['ok']);self.assertIn('server_ms',body)
+        self.health(client)
+
+    def test_gzip_is_negotiated_and_next_response_remains_readable(self):
+        original=self.server.store.handle
+        text='Conexao e mensagem com acentos: ação! '*120
+        self.server.store.handle=lambda request:dict(text=text) if request.get('action')=='compression_fixture' else original(request)
+        client=self.client()
+        for encoding,compressed in [('gzip',True),('br, gzip;q=0.8',True),('gzip;q=0',False),('gzip;q=bad',False),('identity',False),('',False)]:
+            client.request('POST','/api',json.dumps(dict(protocol=1,action='compression_fixture')),{'Content-Type':'application/json','Accept-Encoding':encoding})
+            response=client.getresponse();body=response.read()
+            self.assertEqual(int(response.getheader('Content-Length')),len(body))
+            self.assertEqual(response.getheader('Content-Encoding')=='gzip',compressed)
+            if compressed:
+                self.assertLess(len(body),len(text.encode())//4)
+                body=gzip.decompress(body)
+            self.assertEqual(json.loads(body)['text'],text)
         self.health(client)
 
 

@@ -40,6 +40,23 @@ class AreasTests(unittest.TestCase):
         value.update(extra)
         return value
 
+    def test_nearest_limit_keeps_chat_count_across_other_maps(self):
+        sessions=[]
+        for i in range(44):
+            account=self.register('Crowd'+str(i));session=self.join(account);sessions.append(session)
+            target=11 if i==43 else 10
+            if target==11:self.call('map_enter',token=session['token'],map=11)
+            self.call('map_update',token=session['token'],state=self.state(map=target,seq=1,x=i,y=0),chat_enabled=True)
+        result=self.call('map_update',token=sessions[0]['token'],state=self.state(seq=2,x=0,y=0),chat_enabled=True)
+        self.assertEqual(len(result['peers']),40)
+        self.assertEqual([p['x'] for p in result['peers']],list(range(1,41)))
+        self.assertEqual(result['members'],44)
+        first=result['peers'][0]
+        self.call('map_update',token=sessions[1]['token'],state=self.state(seq=2,x=1,y=0,character='trainer_NEW'))
+        fresh=self.call('map_update',token=sessions[0]['token'],state=self.state(seq=3,x=0,y=0),known_peers={first['id']:first['profile_revision']})['peers'][0]
+        self.assertNotEqual(first['profile_revision'],fresh['profile_revision'])
+        self.assertEqual(fresh['character'],'trainer_NEW')
+
     def test_nickname_offline_persistence_case_and_owner(self):
         lunar = self.register("Lunar")
         other = dict(id=secrets.token_hex(16), secret=secrets.token_hex(32))

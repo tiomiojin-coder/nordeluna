@@ -1,6 +1,8 @@
 """Nordeluna relay. Python 3.10+, standard library only. Run behind HTTPS online."""
 import argparse
 import hashlib
+import gzip
+import heapq
 import hmac
 import json
 import os
@@ -26,10 +28,14 @@ except ModuleNotFoundError:
     from server.testers import TesterService
 
 PROTOCOL = 1
-REVISION = 19
-VERSION = "0.10.7"
+REVISION = 20
+VERSION = "0.10.8"
 FEATURES = ["friends", "invitations", "gifts", "luna_coins", "missions", "matchmaking", "community", "cosmetic_badges", "live_content", "content_updates", "tester_releases", "tester_access", "notices", "moderation", "wardrobe"]
 MAX_BODY = 262144
+KEEPALIVE_REQUESTS = 128
+KEEPALIVE_IDLE_SECONDS = 5
+HTTP_WORKERS = 32
+PERSISTENT_CONNECTIONS = 16
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 DEFAULT_AREAS = {"plaza": 39, "coliseum": 40, "market": 41}
 
@@ -386,7 +392,7 @@ class Store(GiftService, EconomyService, UpdateService, ModerationService, Teste
             row.update(authorized_map=target, map=None, seen=now)
             return {"map": target, "room": row["room"], "revision": REVISION}
         if action == "map_leave":
-            return self.map_action(request)
+            return self.map_action(request,presence_pruned=True)
         require(action == "map_update", "Acao de mapa invalida.")
         state = request.get("state")
         require(isinstance(state, dict) and set(state) == {"map", "x", "y", "seq", "direction", "frame", "moving", "character"}, "Posicao invalida.")
@@ -400,7 +406,7 @@ class Store(GiftService, EconomyService, UpdateService, ModerationService, Teste
                 not character.startswith("/") and ".." not in character.split("/"), "Aparencia invalida.")
         known = request.get("known_peers", {})
         require(isinstance(known, dict) and len(known) <= 40 and all(isinstance(k, str) and isinstance(v, str) and len(v) <= 64 for k, v in known.items()), "Cache de aparencias invalido.")
-        result = self.map_action(request)
+        result = self.map_action(request,presence_pruned=True)
         row["movement_seq"] = sequence
         by_id = {p["id"]: p for p in self.presence.values()}
         for peer in result["peers"]:
@@ -409,7 +415,11 @@ class Store(GiftService, EconomyService, UpdateService, ModerationService, Teste
                         character=remote.get("character", ""), frame=remote.get("frame", 0),
                         moving=remote.get("moving", False), seq=remote["movement_seq"], map=remote["map"],
                         status=self.map_status(remote["account_id"]),badge=self.badge_view(remote["account_id"])['equipped_badge'])
-            fingerprint = hashlib.sha256((remote["name"] + "\0" + remote.get("character", "")).encode()).hexdigest()[:16]
+            profile_key=(remote['name'],remote.get('character',''))
+            if remote.get('_profile_key')!=profile_key:
+                remote['_profile_key']=profile_key
+                remote['_profile_revision']=hashlib.sha256((profile_key[0]+'\0'+profile_key[1]).encode()).hexdigest()[:16]
+            fingerprint = remote['_profile_revision']
             peer["profile_revision"] = fingerprint
             if known.get(peer["id"]) == fingerprint:
                 for field in ("name", "character", "account_id"):
@@ -425,7 +435,7 @@ class Store(GiftService, EconomyService, UpdateService, ModerationService, Teste
         require(value == "PRACA" or re.fullmatch(r"[A-Z2-9]{8}", value), "Use PRACA ou um codigo de 8 caracteres.")
         return value
 
-    def chat_view(self, row, request):
+    def chat_view(self, row, request, members=None):
         self.moderation_refresh()
         now = time.monotonic()
         self.chat_rooms = {key: room for key, room in self.chat_rooms.items() if now - room["seen"] < 1800}
@@ -464,11 +474,11 @@ class Store(GiftService, EconomyService, UpdateService, ModerationService, Teste
         return {"messages": messages[-80:], "chat_epoch": epoch, "chat_ack": acknowledgement,
                 "chat_muted_until":self.moderation_status(row['account_id'])['muted_until'],
                 "room": row["room"], "revision": REVISION, "version": VERSION,
-                "members": sum(p["room"] == row["room"] and p["build"] == row["build"] and self.moderation_peer_allowed(p) for p in self.presence.values())}
+                "members": members if members is not None else sum(p["room"] == row["room"] and p["build"] == row["build"] and self.moderation_peer_allowed(p) for p in self.presence.values())}
 
-    def map_action(self, request):
+    def map_action(self, request, presence_pruned=False):
         now = time.monotonic()
-        self.presence = {key: row for key, row in self.presence.items() if now - row["seen"] < 15}
+        if not presence_pruned:self.presence = {key: row for key, row in self.presence.items() if now - row["seen"] < 15}
         self.resumable = {key: row for key, row in self.resumable.items() if now - row["seen"] < 120}
         action = request["action"]
         if action == "map_join":
@@ -515,16 +525,19 @@ class Store(GiftService, EconomyService, UpdateService, ModerationService, Teste
         elif row["map"] != state["map"]:
             row["emote"] = None
         row.update(state, seen=now)
+        # Filter the room once for both visibility and chat counts. Build wire
+        # records only for the nearest 40, rather than every player in the room.
+        room_members=[peer for peer in self.presence.values() if peer['build']==row['build'] and peer['room']==row['room'] and self.moderation_peer_allowed(peer)]
+        nearest=heapq.nsmallest(40,(peer for peer in room_members if peer['id']!=row['id'] and peer['map']==row['map']),
+            key=lambda peer:abs(peer['x']-row['x'])+abs(peer['y']-row['y']))
         peers = [{"id": peer["id"], "name": peer["name"], "x": peer["x"], "y": peer["y"],
                   "emote": peer["emote"] if now - peer["last_emote"] < 4 else None,
                   "sequence": peer["sequence"]}
-                 for peer in self.presence.values()
-                 if peer["id"] != row["id"] and peer["build"] == row["build"] and peer["room"] == row["room"] and peer["map"] == row["map"] and self.moderation_peer_allowed(peer)]
+                 for peer in nearest]
         # Legacy map clients remain compatible and do not receive chat payloads.
-        peers.sort(key=lambda p: abs(p["x"] - row["x"]) + abs(p["y"] - row["y"]))
-        result = {"peers": peers[:40], "cooldown": 3}
+        result = {"peers": peers, "cooldown": 3}
         if request.get("chat_enabled") is True:
-            result.update(self.chat_view(row, request))
+            result.update(self.chat_view(row, request, members=len(room_members)))
         return result
 
     def save(self, room):
@@ -698,7 +711,7 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     def setup(self):
         super().setup()
-        self.connection.settimeout(3)
+        self.connection.settimeout(KEEPALIVE_IDLE_SECONDS)
         self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.persistent_slot = False
         self.served_count = 0
@@ -777,24 +790,43 @@ class Handler(BaseHTTPRequestHandler):
         # metadata must remain readable even before players update the game.
         if started is not None:body=dict(body,server_ms=max(0,round((time.perf_counter()-started)*1000)))
         raw = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        compressed=False
+        if len(raw)>=1024 and self.accepts_gzip():
+            packed=gzip.compress(raw,compresslevel=1,mtime=0)
+            if len(packed)<len(raw):raw=packed;compressed=True
         self.served_count+=1
         slots=getattr(self.server,'keepalive_slots',None)
         if not self.close_connection and not self.persistent_slot and slots:
             self.persistent_slot=slots.acquire(blocking=False)
-        if not self.persistent_slot or self.served_count>=16:self.close_connection=True
+        if not self.persistent_slot or self.served_count>=KEEPALIVE_REQUESTS:self.close_connection=True
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header('Vary','Accept-Encoding')
+        if compressed:self.send_header('Content-Encoding','gzip')
         self.send_header('Connection','close' if self.close_connection else 'keep-alive')
-        if not self.close_connection:self.send_header('Keep-Alive','timeout=3, max='+str(16-self.served_count))
+        if not self.close_connection:self.send_header('Keep-Alive','timeout='+str(KEEPALIVE_IDLE_SECONDS)+', max='+str(KEEPALIVE_REQUESTS-self.served_count))
         self.end_headers()
         try:
             self.wfile.write(raw)
         except (BrokenPipeError, ConnectionResetError):
             self.close_connection=True
         finally:
-            self.connection.settimeout(3)
+            self.connection.settimeout(KEEPALIVE_IDLE_SECONDS)
+
+    def accepts_gzip(self):
+        for item in self.headers.get('Accept-Encoding','').split(','):
+            parts=item.strip().lower().split(';')
+            if parts[0].strip()!='gzip':continue
+            quality=1.0
+            for parameter in parts[1:]:
+                key,_,value=parameter.partition('=')
+                if key.strip()=='q':
+                    try:quality=float(value.strip())
+                    except ValueError:return False
+            return 0<quality<=1
+        return False
 
     def log_message(self, fmt, *args):
         # No bearer tokens or Pokemon in logs.
@@ -807,10 +839,9 @@ class RelayHTTPServer(ThreadingHTTPServer):
     request_queue_size = 32
 
     def __init__(self, *args, **kwargs):
-        self.workers = threading.BoundedSemaphore(24)
-        # Only eight of 24 workers may wait on a reusable connection; the rest
-        # remain available for new players, actions and hosting health probes.
-        self.keepalive_slots = threading.BoundedSemaphore(8)
+        self.workers = threading.BoundedSemaphore(HTTP_WORKERS)
+        # Persistent sockets cannot consume the workers reserved for new requests.
+        self.keepalive_slots = threading.BoundedSemaphore(PERSISTENT_CONNECTIONS)
         self.tester_attempts={}
         self.tester_rate_lock=threading.Lock()
         super().__init__(*args, **kwargs)

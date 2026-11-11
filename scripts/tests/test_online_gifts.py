@@ -93,13 +93,13 @@ class GiftTests(unittest.TestCase):
     def test_http_worker_limit_recovers_without_unbounded_threads(self):
         server=relay.RelayHTTPServer(('127.0.0.1',0),relay.Handler);server.store=self.store
         try:
-            for _ in range(24):self.assertTrue(server.workers.acquire(False))
+            for _ in range(relay.HTTP_WORKERS):self.assertTrue(server.workers.acquire(False))
             request=Mock()
             server.shutdown_request=Mock()
             server.process_request(request,('127.0.0.1',1234))
             self.assertTrue(request.sendall.call_args[0][0].startswith(b'HTTP/1.0 503'))
             server.shutdown_request.assert_called_once_with(request)
-            for _ in range(24):server.workers.release()
+            for _ in range(relay.HTTP_WORKERS):server.workers.release()
             self.assertTrue(server.workers.acquire(False));server.workers.release()
         finally:
             server.server_close()
