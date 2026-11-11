@@ -37,7 +37,7 @@ jobs:
           $process = Start-Process .cache/inno/setup.exe -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER',('/DIR="'+$compiler+'"')) -WindowStyle Hidden -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw 'Compiler install failed' }
       - name: Build installer and full update
-        run: python scripts/build-pc-installer.py --game pc-source --version 1.3.1 --code 131
+        run: python scripts/build-pc-installer.py --game pc-source --version 1.3.2 --code 132
       - name: Verify launcher and file handling
         run: |
           python -m pip install cryptography==46.0.3
@@ -46,19 +46,19 @@ jobs:
       - name: Protect tester distribution
         run: |
           python -m pip install cryptography==46.0.3
-          python scripts/tester-build-tools.py build/pc/Nordeluna-PC-1.3.1-Completo.zip build/pc/Nordeluna-PC-1.3.1-Completo.zip.locked
+          python scripts/tester-build-tools.py build/pc/Nordeluna-PC-1.3.2-Completo.zip build/pc/Nordeluna-PC-1.3.2-Completo.zip.locked
       - uses: actions/upload-artifact@v4
         with:
-          name: Nordeluna-PC-1.3.1
+          name: Nordeluna-PC-1.3.2
           path: |
-            build/pc/Nordeluna-PC-1.3.1-Setup.exe*
-            build/pc/Nordeluna-PC-1.3.1-Completo.zip*
+            build/pc/Nordeluna-PC-1.3.2-Setup.exe*
+            build/pc/Nordeluna-PC-1.3.2-Completo.zip*
           compression-level: 0
           retention-days: 14
       - name: Publish Windows downloads
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view pc-1.3.1 --repo "$env:GITHUB_REPOSITORY"
-          if ($LASTEXITCODE -ne 0) { gh release create pc-1.3.1 --repo "$env:GITHUB_REPOSITORY" --title 'Nordeluna PC 1.3.1' --notes-file docs/release-1.16.1.md }
-          gh release upload pc-1.3.1 build/pc/Nordeluna-PC-1.3.1-Setup.exe build/pc/Nordeluna-PC-1.3.1-Setup.exe.sha256 build/pc/Nordeluna-PC-1.3.1-Completo.zip build/pc/Nordeluna-PC-1.3.1-Completo.zip.sha256 build/pc/Nordeluna-PC-1.3.1-Completo.zip.repair.json build/pc/Nordeluna-PC-1.3.1-Completo.zip.locked build/pc/Nordeluna-PC-1.3.1-Completo.zip.locked.json --repo "$env:GITHUB_REPOSITORY" --clobber
+          gh release view pc-1.3.2 --repo "$env:GITHUB_REPOSITORY"
+          if ($LASTEXITCODE -ne 0) { gh release create pc-1.3.2 --repo "$env:GITHUB_REPOSITORY" --title 'Nordeluna PC 1.3.2' --notes-file docs/release-1.16.2.md }
+          gh release upload pc-1.3.2 build/pc/Nordeluna-PC-1.3.2-Setup.exe build/pc/Nordeluna-PC-1.3.2-Setup.exe.sha256 build/pc/Nordeluna-PC-1.3.2-Completo.zip build/pc/Nordeluna-PC-1.3.2-Completo.zip.sha256 build/pc/Nordeluna-PC-1.3.2-Completo.zip.repair.json build/pc/Nordeluna-PC-1.3.2-Completo.zip.locked build/pc/Nordeluna-PC-1.3.2-Completo.zip.locked.json --repo "$env:GITHUB_REPOSITORY" --clobber
